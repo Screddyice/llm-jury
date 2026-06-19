@@ -1,0 +1,2 @@
+Read two integers a and b from standard input (space-separated, on one line) and
+print their sum to standard output.

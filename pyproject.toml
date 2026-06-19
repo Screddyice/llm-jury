@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "litmus-verify"
+version = "0.1.0"
+description = "Local verified answers — don't vote, verify. A small-model council + a real verifier, on your own machine."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "The AI Collective" }]
+keywords = ["llm", "verification", "best-of-n", "local", "ollama", "code-generation", "fusion"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = []  # stdlib only
+
+[project.urls]
+Homepage = "https://github.com/ajsai47/litmus"
+Post = "https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb"
+
+[project.scripts]
+litmus = "litmus.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["litmus*"]
+
+[tool.setuptools.package-data]
+"litmus.benchmarks" = ["data/*.json"]
