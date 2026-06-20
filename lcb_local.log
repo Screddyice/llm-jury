@@ -1,0 +1,15 @@
+=== LCB LOCAL (restart) — start Fri Jun 19 18:50:48 PDT 2026 ===
+Reproducing lcb on 25 problems (backend=ollama, k=4)...
+
+  [ 1/25] abc301_f         PASS  (council    gemma3:12b)
+  [ 2/25] abc301_c         ----  (unverified phi4)
+  [ 3/25] abc301_d         PASS  (single     phi4)
+  [ 4/25] abc301_e         ----  (unverified phi4)
+  [ 5/25] abc302_f         PASS  (single     phi4)
+  [ 6/25] abc302_d         PASS  (council    gemma3:12b)
+  [ 7/25] abc302_e         PASS  (single     phi4)
+  [ 8/25] abc302_b         PASS  (council    gemma3:12b)
+  [ 9/25] abc302_c         PASS  (single     phi4)
+  [10/25] abc303_e         PASS  (council    gemma3:12b)
+  [11/25] abc303_d         PASS  (council    gemma3:12b)
+  [12/25] abc303_c         PASS  (single     phi4)

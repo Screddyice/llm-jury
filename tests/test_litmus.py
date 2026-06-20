@@ -64,6 +64,50 @@ def test_sandbox_blocks_secret_read():
         del os.environ["LITMUS_TEST_SECRET"]
 
 
+class _FakeBackend:
+    """Deterministic backend for offline engine tests — no network, no models."""
+    name = "ollama"
+
+    def __init__(self, responses):
+        self.responses = responses  # {model: [text, ...]}
+
+    def complete(self, model, prompt, n=1, temperature=0.7, max_tokens=4000):
+        r = self.responses.get(model, [""])
+        return [r[i % len(r)] for i in range(n)]
+
+
+_TESTS = "def check(c):\n    assert c(2, 3) == 5\n"
+_GOOD = "```python\ndef add(a, b):\n    return a + b\n```"
+_BAD = "```python\ndef add(a, b):\n    return a - b\n```"
+
+
+def test_engine_single_when_best_solves():
+    from litmus.engine import Engine
+    from litmus.verifiers import FunctionalCodeVerifier
+    eng = Engine(_FakeBackend({"best": [_GOOD]}), panel=["best", "other"], best="best", k=2)
+    r = eng.solve("add", FunctionalCodeVerifier(_TESTS, "add"))
+    assert r.verified and r.stage == "single" and r.model == "best"
+
+
+def test_engine_escalates_to_council():
+    from litmus.engine import Engine
+    from litmus.verifiers import FunctionalCodeVerifier
+    # best always wrong; the other council member is correct -> must escalate and pick it
+    eng = Engine(_FakeBackend({"best": [_BAD], "other": [_GOOD]}),
+                 panel=["best", "other"], best="best", k=2)
+    r = eng.solve("add", FunctionalCodeVerifier(_TESTS, "add"))
+    assert r.verified and r.stage == "council" and r.model == "other"
+
+
+def test_engine_unverified_when_nobody_solves():
+    from litmus.engine import Engine
+    from litmus.verifiers import FunctionalCodeVerifier
+    eng = Engine(_FakeBackend({"best": [_BAD], "other": [_BAD]}),
+                 panel=["best", "other"], best="best", k=2)
+    r = eng.solve("add", FunctionalCodeVerifier(_TESTS, "add"))
+    assert not r.verified and r.stage == "unverified"
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items()
                    if k.startswith("test_") and callable(v))

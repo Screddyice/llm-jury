@@ -11,6 +11,7 @@ response cache, so reruns are near-free.
 """
 import os
 import json
+import time
 
 from ..engine import Engine
 from ..verifiers import FunctionalCodeVerifier, StdioCodeVerifier
@@ -27,7 +28,7 @@ REFERENCE = {
 def _backend(name):
     if name == "ollama":
         from ..backends import OllamaBackend
-        return OllamaBackend(cache_path=CACHE)
+        return OllamaBackend(cache_path=CACHE, max_workers=2)  # gentler on the GPU
     from ..backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -38,7 +39,7 @@ def _verifier(which, p):
     return StdioCodeVerifier(p["cases"])
 
 
-def run(which, backend="openrouter", n=None, k=4):
+def run(which, backend="openrouter", n=None, k=4, pace=0.0):
     with open(os.path.join(DATA, f"{which}_slice.json"), encoding="utf-8") as fh:
         probs = json.load(fh)
     if n:
@@ -55,6 +56,8 @@ def run(which, backend="openrouter", n=None, k=4):
             council += 1
         mark = "PASS" if r.verified else "----"
         print(f"  [{i+1:2}/{len(probs)}] {p['id']:16} {mark}  ({r.stage:10} {r.model})", flush=True)
+        if pace:
+            time.sleep(pace)  # duty-cycle: let the GPU cool between problems
 
     nn = len(probs)
     total = single + council

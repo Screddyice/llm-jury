@@ -61,7 +61,7 @@ def cmd_solve(a):
 
 def cmd_reproduce(a):
     from .benchmarks import reproduce
-    reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k)
+    reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace)
 
 
 def main():
@@ -84,6 +84,8 @@ def main():
     r.add_argument("--backend", default="openrouter", choices=["openrouter", "ollama"])
     r.add_argument("--n", type=int, default=None, help="number of problems (default: full bundled slice)")
     r.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
+    r.add_argument("--pace", type=float, default=0.0,
+                   help="seconds to pause between problems (duty-cycle to keep the GPU cool)")
     r.set_defaults(func=cmd_reproduce)
 
     a = p.parse_args()
