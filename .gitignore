@@ -6,5 +6,6 @@ build/
 .eggs/
 .litmus/
 .DS_Store
+*.log
 .venv/
 venv/
