@@ -40,6 +40,23 @@ the problem, the bigger the win. ([Read the full write-up →](https://app.notio
 > *out-of-the-box* answer," not "wins sample-for-sample." For someone choosing between their
 > laptop and an API bill, that's the comparison that matters.
 
+## Benchmarks
+
+Head-to-head on the same hard LiveCodeBench problems, judged by the same oracle
+([full numbers + methodology](BENCHMARKS.md)):
+
+| | Accuracy | Cost / 12 problems | Local | Verified |
+|---|---|---|---|---|
+| Frontier model, one shot | 67% | ~$0.12 | ✗ | ✗ |
+| OpenRouter Fusion (cloud) | **100%** | **$6.04** | ✗ | ✗ |
+| **Litmus** (small council + verifier) | 75% | **$0.008** · free local | ✓ | ✓ |
+
+Litmus is **not** the most accurate — a frontier cloud fusion wins on raw accuracy. It's the
+**best price-performance** (~700× cheaper than that fusion), the **only** local + private + verified
+option, and it beats the frontier *default* one-shot. On easier code (HumanEval+) it **matches
+frontier outright** (97.6%). The honest trade: ~frontier-default quality on verifiable code, for a
+fraction of a cent, on a machine you own.
+
 ## Quickstart
 
 **CLI** (examples ship in the repo):
