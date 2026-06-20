@@ -16,4 +16,6 @@ LOCAL_BEST = "phi4"
 def default_panel(backend_name):
     if backend_name == "ollama":
         return LOCAL_BEST, LOCAL_PANEL
+    if backend_name == "demo":
+        return "demo-weak", ["demo-weak", "demo-council"]
     return CLOUD_BEST, CLOUD_PANEL

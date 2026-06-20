@@ -19,6 +19,13 @@ First public release.
   GPU load on long runs.
 - Sandboxed execution of model-generated code: scrubbed environment, isolated temp working
   directory, POSIX CPU/file-size/core limits. Not a full sandbox — see the README's security note.
-- Offline test suite; zero runtime dependencies.
+- `litmus demo` — runs the full pipeline offline with no API key (built-in `DemoBackend`).
+- Bring-your-own-tests: `FunctionalCodeVerifier.from_cases([(args, expected), ...])`, and `--tests`
+  now accepts a full `def check(candidate): ...` OR just its body.
+- `litmus solve --json` (machine-readable result), `--models` / `--best` (custom council from the CLI).
+- Hardened execution: process-group kill on timeout (reaps forked grandchildren), 1 MiB output cap,
+  and refuses to run as root unless `LITMUS_ALLOW_ROOT=1`.
+- Head-to-head [BENCHMARKS.md](BENCHMARKS.md) vs frontier one-shot and OpenRouter Fusion.
+- Offline test suite (14 tests); zero runtime dependencies.
 
 [0.1.0]: https://github.com/ajsai47/litmus/releases/tag/v0.1.0

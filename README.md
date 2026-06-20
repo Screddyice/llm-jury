@@ -13,6 +13,16 @@ Zero dependencies. Stdlib only.
 pip install litmus-verify
 ```
 
+**Try it in 5 seconds — no API key, nothing to download:**
+
+```bash
+litmus demo
+```
+
+It runs the real generate → verify → escalate pipeline on a canned task with a built-in offline
+backend: a "weak" model returns a wrong answer, the verifier catches it, and the council's answer
+passes. That's the whole product, offline.
+
 > **⚠️ Security.** Litmus *executes model-generated code* to verify it — that's the whole
 > point, and it's inherently risky. v0.1 isolates execution (scrubbed environment, isolated
 > temp directory, CPU/file-size limits) but is **not a real sandbox**. Don't run untrusted
@@ -84,6 +94,16 @@ print(result.verified)   # True
 print(result.answer)     # def add(a, b): return a + b
 print(result.stage)      # "single"  (escalates to "council" on hard problems)
 ```
+
+**Bring your own tests** — skip the `check()` string entirely with `(args, expected)` pairs:
+
+```python
+from litmus import FunctionalCodeVerifier
+verifier = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0)])
+```
+
+(`--tests` also accepts either a full `def check(candidate): ...` or just its body. And
+`litmus solve --json` emits a machine-readable result for piping into CI/agents.)
 
 ## How it works
 

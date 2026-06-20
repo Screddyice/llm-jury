@@ -32,7 +32,14 @@ def _backend(name):
     return OpenRouterBackend(cache_path=CACHE)
 
 
+def _refuse_root():
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and os.environ.get("LITMUS_ALLOW_ROOT") != "1":
+        sys.exit("error: refusing to run as root — Litmus executes model-generated code. "
+                 "Set LITMUS_ALLOW_ROOT=1 to override (not recommended).")
+
+
 def cmd_solve(a):
+    _refuse_root()
     task = _read(a.task)
     if a.cases:
         try:
@@ -41,21 +48,47 @@ def cmd_solve(a):
             sys.exit(f"error: --cases is not valid JSON: {e}")
         verifier = StdioCodeVerifier(cases)
     elif a.tests:
-        verifier = FunctionalCodeVerifier(_read(a.tests), a.entry_point or "solve")
+        ep = a.entry_point or "solve"
+        if not a.entry_point:
+            sys.stderr.write("[litmus] note: no --entry-point given; assuming 'solve'. "
+                             "Pass --entry-point if your function has another name.\n")
+        verifier = FunctionalCodeVerifier(_read(a.tests), ep)
     else:
         sys.exit("error: provide --tests (functional check) or --cases (stdin/stdout JSON)")
 
+    panel = a.models.split(",") if a.models else None
+    best = a.best or (panel[0] if panel else None)
     sys.stderr.write(WARNING)
-    r = Engine(_backend(a.backend), k=a.k).solve(task, verifier)
+    r = Engine(_backend(a.backend), panel=panel, best=best, k=a.k).solve(task, verifier)
 
-    status = "VERIFIED" if r.verified else "UNVERIFIED (no candidate passed)"
-    sys.stderr.write(
-        f"# litmus: {status}  [stage={r.stage}, model={r.model}, attempts={r.attempts}]\n\n")
-    if r.verified:
-        print(r.answer)            # only verified code reaches stdout
+    if a.json:
+        import dataclasses
+        payload = {k: v for k, v in dataclasses.asdict(r).items() if k != "raw"}
+        print(json.dumps(payload))
     else:
-        # Don't pipe an unverified, possibly-broken answer to stdout; keep it on stderr.
-        sys.stderr.write((r.answer or "(no code extracted)") + "\n")
+        status = "VERIFIED" if r.verified else "UNVERIFIED (no candidate passed)"
+        sys.stderr.write(
+            f"# litmus: {status}  [stage={r.stage}, model={r.model}, attempts={r.attempts}]\n\n")
+        if r.verified:
+            print(r.answer)            # only verified code reaches stdout
+        else:
+            sys.stderr.write((r.answer or "(no code extracted)") + "\n")
+    sys.exit(0 if r.verified else 1)
+
+
+def cmd_demo(a):
+    from .backends import DemoBackend
+    from .verifiers import FunctionalCodeVerifier
+    sys.stderr.write("[litmus] demo — offline, no API key, no Ollama. "
+                     "Running the real pipeline on a canned task...\n")
+    task = "Write a function `add(a, b)` that returns the sum of two numbers."
+    verifier = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0), ((0, 0), 0)])
+    r = Engine(DemoBackend(), k=2).solve(task, verifier)
+    sys.stderr.write(f"# litmus: {'VERIFIED' if r.verified else 'UNVERIFIED'}  "
+                     f"[stage={r.stage}, model={r.model}, attempts={r.attempts}]\n\n")
+    print(r.answer)
+    sys.stderr.write("\n(The 'weak' model returned a-b; the verifier caught it; the council's "
+                     "a+b passed. That's the whole product — offline.)\n")
     sys.exit(0 if r.verified else 1)
 
 
@@ -72,12 +105,18 @@ def main():
 
     s = sub.add_parser("solve", help="solve a verifiable task with a verified small-model council")
     s.add_argument("--task", required=True, help="file containing the problem statement")
-    s.add_argument("--tests", help="functional test file: the body of check(candidate)")
+    s.add_argument("--tests", help="functional test file: a full check(candidate) OR just its body")
     s.add_argument("--entry-point", help="function name the tests call (default: solve)")
     s.add_argument("--cases", help='JSON file: [{"input": "...", "output": "..."}] stdin/stdout cases')
     s.add_argument("--backend", default="openrouter", choices=["openrouter", "ollama"])
     s.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
+    s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
+    s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
+    s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
     s.set_defaults(func=cmd_solve)
+
+    sub.add_parser("demo", help="run the full pipeline offline — no API key, no Ollama") \
+        .set_defaults(func=cmd_demo)
 
     r = sub.add_parser("reproduce", help="reproduce the benchmark numbers from the post")
     r.add_argument("which", choices=["humaneval", "lcb"])

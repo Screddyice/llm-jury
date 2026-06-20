@@ -14,8 +14,12 @@ secrets; use a container or VM for real isolation.
 import os
 import re
 import sys
+import signal
+import textwrap
 import subprocess
 import tempfile
+
+_MAX_OUTPUT = 1 << 20  # cap captured stdout/stderr at 1 MiB (a print-bomb can't OOM the parent)
 
 # ---------------------------------------------------------------- code extraction
 _PROG = re.compile(r"(?:^|\n)\s*(?:def |class |import |from |if |for |while |return |print\(|input\()")
@@ -92,9 +96,25 @@ def _limits(cpu_seconds):
 
 
 def _run(args, stdin, timeout, workdir):
-    return subprocess.run(
-        args, input=stdin, capture_output=True, text=True, timeout=timeout,
-        cwd=workdir, env=_safe_env(workdir), preexec_fn=_limits(timeout))
+    # start_new_session puts the child in its own process group so a timeout can reap
+    # the WHOLE tree (forked grandchildren), not just the direct child.
+    p = subprocess.Popen(
+        args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=workdir, env=_safe_env(workdir),
+        preexec_fn=_limits(timeout), start_new_session=hasattr(os, "setsid"))
+    try:
+        out, err = p.communicate(input=stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+            else:
+                p.kill()
+        except (ProcessLookupError, OSError):
+            pass
+        p.wait()
+        raise
+    return subprocess.CompletedProcess(args, p.returncode, out[:_MAX_OUTPUT], err[:_MAX_OUTPUT])
 
 
 def _same_output(got, want):
@@ -115,8 +135,9 @@ class Verifier:
 
 
 class FunctionalCodeVerifier(Verifier):
-    """HumanEval-style. The candidate defines `entry_point`; `test` is the body of a
-    `check(candidate)` function. Passes iff `check(entry_point)` runs without raising.
+    """HumanEval-style. The candidate defines `entry_point`; `test` is EITHER a full
+    `def check(candidate): ...` OR just its body (assert statements). Passes iff
+    `check(entry_point)` runs without raising.
     """
     def __init__(self, test, entry_point, header="", timeout=20):
         self.test = test
@@ -124,12 +145,30 @@ class FunctionalCodeVerifier(Verifier):
         self.header = header
         self.timeout = timeout
 
+    @classmethod
+    def from_cases(cls, entry_point, cases, **kw):
+        """Build a verifier from (args, expected) pairs — no check() string to learn:
+
+            FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0)])
+
+        `args` may be a tuple of positional args, or a single value.
+        """
+        lines = []
+        for args, expected in cases:
+            if not isinstance(args, tuple):
+                args = (args,)
+            lines.append(f"assert candidate({', '.join(map(repr, args))}) == {expected!r}")
+        return cls("\n".join(lines), entry_point, **kw)
+
     def verify(self, candidate_text):
         code = extract_code(candidate_text)
         if not code:
             return False
+        # Accept a full `def check(candidate): ...` OR just its body (assert lines).
+        test = self.test if re.search(r"(?m)^\s*def\s+check\s*\(", self.test or "") \
+            else "def check(candidate):\n" + textwrap.indent(self.test or "pass", "    ")
         program = (
-            f"{self.header}\n{code}\n\n{self.test}\n\n"
+            f"{self.header}\n{code}\n\n{test}\n\n"
             f"check({self.entry_point})\nprint('LITMUS_OK')"
         )
         try:

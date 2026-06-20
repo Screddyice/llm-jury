@@ -112,6 +112,22 @@ class OpenRouterBackend(Backend):
         return ""
 
 
+class DemoBackend(Backend):
+    """Offline, canned backend so `litmus demo` runs with no API key and no Ollama —
+    while still exercising the REAL generate->verify->select->escalate pipeline and the
+    REAL code-executing verifier. `demo-weak` returns a wrong answer and `demo-council` a
+    right one, so the demo actually shows the council recovering what one model missed.
+    """
+    name = "demo"
+    _RESP = {
+        "demo-weak": "```python\ndef add(a, b):\n    return a - b  # subtly wrong\n```",
+        "demo-council": "```python\ndef add(a, b):\n    return a + b\n```",
+    }
+
+    def _one(self, model, prompt, temperature, max_tokens):
+        return self._RESP.get(model, "")
+
+
 class OllamaBackend(Backend):
     name = "ollama"
 

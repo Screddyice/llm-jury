@@ -6,6 +6,7 @@ council actually pays, and it keeps the common case cheap and memory-light.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from .verifiers import extract_code
@@ -79,6 +80,10 @@ class Engine:
 
 def solve(task, verifier, backend=None, **kw):
     """Litmus in one call. Defaults to the OpenRouter backend; pass backend= for Ollama."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and os.environ.get("LITMUS_ALLOW_ROOT") != "1":
+        raise PermissionError(
+            "Litmus refuses to run as root — it executes model-generated code. "
+            "Set LITMUS_ALLOW_ROOT=1 to override (not recommended).")
     if backend is None:
         from .backends import OpenRouterBackend
         backend = OpenRouterBackend(cache_path="~/.litmus/cache.jsonl")

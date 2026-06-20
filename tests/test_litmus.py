@@ -108,6 +108,38 @@ def test_engine_unverified_when_nobody_solves():
     assert not r.verified and r.stage == "unverified"
 
 
+def test_functional_verifier_accepts_body_only():
+    # the documented form: just the body of check(), no `def check(candidate):`
+    body = "assert candidate(2, 3) == 5\nassert candidate(-1, 1) == 0\n"
+    assert FunctionalCodeVerifier(body, "add").verify(_GOOD)
+    assert not FunctionalCodeVerifier(body, "add").verify(_BAD)
+
+
+def test_functional_verifier_from_cases():
+    v = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0), ((0, 0), 0)])
+    assert v.verify(_GOOD)
+    assert not v.verify(_BAD)
+    # single non-tuple arg convenience (for 1-arg functions)
+    sq = "```python\ndef square(x):\n    return x * x\n```"
+    assert FunctionalCodeVerifier.from_cases("square", [(5, 25), (3, 9)]).verify(sq)
+
+
+def test_demo_backend_escalates_and_verifies():
+    from litmus.engine import Engine
+    from litmus.backends import DemoBackend
+    r = Engine(DemoBackend(), k=2).solve(
+        "add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
+    assert r.verified and r.stage == "council" and r.model == "demo-council"
+
+
+def test_timeout_is_bounded():
+    import time
+    slow = "```python\ndef f():\n    import time\n    time.sleep(30)\n```"
+    t = time.time()
+    ok = FunctionalCodeVerifier("def check(c):\n    c()\n", "f", timeout=2).verify(slow)
+    assert not ok and (time.time() - t) < 10  # reaped near the timeout, not after 30s
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items()
                    if k.startswith("test_") and callable(v))
