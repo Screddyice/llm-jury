@@ -132,6 +132,17 @@ def test_demo_backend_escalates_and_verifies():
     assert r.verified and r.stage == "council" and r.model == "demo-council"
 
 
+def test_engine_frontier_escalation():
+    from litmus.engine import Engine
+    # local council fails everything; a separate frontier backend solves it on the last tier
+    council = _FakeBackend({"best": [_BAD], "other": [_BAD]})
+    frontier_bk = _FakeBackend({"front": [_GOOD]})
+    eng = Engine(council, panel=["best", "other"], best="best", k=2,
+                 frontier="front", frontier_backend=frontier_bk)
+    r = eng.solve("add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
+    assert r.verified and r.stage == "frontier" and r.model == "front"
+
+
 def test_timeout_is_bounded():
     import time
     slow = "```python\ndef f():\n    import time\n    time.sleep(30)\n```"

@@ -25,13 +25,13 @@ class Result:
     raw: str | None         # full model text of the chosen sample
     verified: bool          # did it pass the verifier?
     model: str | None       # which model produced the chosen sample
-    stage: str              # "single", "council", or "unverified"
+    stage: str              # "single", "council", "frontier", or "unverified"
     attempts: int           # total samples generated
 
 
 class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
-                 k=4, max_tokens=4000, temperature=0.7):
+                 k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -40,6 +40,8 @@ class Engine:
         self.k = k
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.frontier = frontier                          # opt-in strong model for the last tier
+        self.frontier_backend = frontier_backend or backend
 
     def _gen(self, model, prompt, n):
         texts = self.backend.complete(model, prompt, n=n,
@@ -64,6 +66,17 @@ class Engine:
                     attempts += 1
                     if verifier.verify(text):
                         return Result(extract_code(text), text, True, model, "council", attempts)
+
+        # Stage 3: opt-in frontier escalation — one strong (cloud) model, only when the local
+        # council couldn't verify. This is what lets a local-first setup match a cloud fusion's
+        # accuracy while paying for a frontier call on the hard minority, not on every problem.
+        if escalate and self.frontier:
+            for text in self.frontier_backend.complete(
+                    self.frontier, prompt, n=self.k,
+                    temperature=self.temperature, max_tokens=self.max_tokens):
+                attempts += 1
+                if verifier.verify(text):
+                    return Result(extract_code(text), text, True, self.frontier, "frontier", attempts)
 
         # Nothing verified — return the most complete best-effort (longest extractable
         # code), flagged unverified, rather than blindly the first sample.

@@ -58,8 +58,13 @@ def cmd_solve(a):
 
     panel = a.models.split(",") if a.models else None
     best = a.best or (panel[0] if panel else None)
+    fb = None
+    if a.frontier:
+        from .backends import OpenRouterBackend
+        fb = OpenRouterBackend(cache_path=CACHE)   # the frontier tier is a cloud model
     sys.stderr.write(WARNING)
-    r = Engine(_backend(a.backend), panel=panel, best=best, k=a.k).solve(task, verifier)
+    r = Engine(_backend(a.backend), panel=panel, best=best, k=a.k,
+               frontier=a.frontier, frontier_backend=fb).solve(task, verifier)
 
     if a.json:
         import dataclasses
@@ -113,6 +118,8 @@ def main():
     s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
+    s.add_argument("--frontier", help="opt-in: a strong cloud model (e.g. deepseek/deepseek-v4-pro) "
+                   "to escalate to when the local council can't verify (needs OPENROUTER_API_KEY)")
     s.set_defaults(func=cmd_solve)
 
     sub.add_parser("demo", help="run the full pipeline offline — no API key, no Ollama") \

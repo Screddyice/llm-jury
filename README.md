@@ -53,19 +53,29 @@ the problem, the bigger the win. ([Read the full write-up →](https://app.notio
 ## Benchmarks
 
 Head-to-head on the same hard LiveCodeBench problems, judged by the same oracle
-([full numbers + methodology](BENCHMARKS.md)):
+([full numbers + methodology + caveats](BENCHMARKS.md)):
 
 | | Accuracy | Cost / 12 problems | Local | Verified |
 |---|---|---|---|---|
 | Frontier model, one shot | 67% | ~$0.12 | ✗ | ✗ |
-| OpenRouter Fusion (cloud) | **100%** | **$6.04** | ✗ | ✗ |
-| **Litmus** (small council + verifier) | 75% | **$0.008** · free local | ✓ | ✓ |
+| OpenRouter Fusion (cloud) | 12/12 (100%) | **$6.04** | ✗ | ✗ |
+| **Litmus hybrid** (council + 1 frontier escalation) | 12/12 (100%) | **$0.169** | ◐ | ✓ |
+| **Litmus council** (small open council, local) | 9/12 (75%) | **$0.008** · free local | ✓ | ✓ |
 
-Litmus is **not** the most accurate — a frontier cloud fusion wins on raw accuracy. It's the
-**best price-performance** (~700× cheaper than that fusion), the **only** local + private + verified
-option, and it beats the frontier *default* one-shot. On easier code (HumanEval+) it **matches
-frontier outright** (97.6%). The honest trade: ~frontier-default quality on verifiable code, for a
-fraction of a cent, on a machine you own.
+**The hybrid ties OpenRouter Fusion on this 12-problem head-to-head — both 12/12 — for ~36× less
+money** ($0.169 vs $6.04). It solves 75% of problems with a local council and escalates only the
+hard minority to a single frontier model. On the full 45-problem set it scores **44/45 (97.8%)**
+for **$0.49** (an extrapolated ~46× cost advantage). The plain **council**, with no cloud at all,
+gets 75.6% on hard code for 3 cents — and on easier code (HumanEval+) **matches frontier outright**
+(97.6%).
+
+Stated honestly: the **cost** gap is measured and large; the **accuracy** result is a *tie on
+n=12*, which is too small to prove either system is more accurate (each arm's 95% CI ≈ 74–100%).
+We don't claim Litmus is *more* accurate than a frontier fusion — we claim it reaches the same
+score on the problems we could compare, far cheaper, with most work kept local. The escalated ~25%
+do leave the device, and "correct" here means "passes the public sample tests." Full caveats —
+confidence intervals, the public-test oracle, the extrapolation — are in
+[BENCHMARKS.md](BENCHMARKS.md).
 
 ## Quickstart
 
@@ -77,6 +87,11 @@ litmus solve --task examples/add_task.txt --tests examples/add_test.py --entry-p
 
 # or competitive-programming style (stdin/stdout cases as JSON)
 litmus solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json
+
+# hybrid: run the local council, and escalate ONLY what it can't verify to one
+# frontier model — Fusion-class accuracy, a frontier call on the hard minority, not on everything
+litmus solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
+    --backend ollama --frontier deepseek/deepseek-v4-pro   # needs OPENROUTER_API_KEY
 ```
 
 **Python:**
@@ -112,11 +127,14 @@ task + verifier
   → GENERATE   sample candidates across a cross-lineage small-model council
   → VERIFY     run the verifier on each (code = run the tests)
   → SELECT     return the one that provably passes
-  → ESCALATE   try one model first; add the council only when nothing passes
+  → ESCALATE   one model first → add the council only when nothing passes
+               → (optional) one frontier model only when the council can't either
 ```
 
-That last step is what keeps it laptop-friendly: the common case runs **one** model fast, and
-only the hard problems load the full council.
+That tiered escalation is what keeps it laptop-friendly *and* lets it reach frontier-class
+accuracy: the common case runs **one** model fast, hard problems load the full local council, and —
+if you opt in with `--frontier` — the small hard minority the council can't verify escalates to a
+single cloud model. You pay for the frontier only on the problems that need it, not on every call.
 
 **The rule Litmus is built on:** combining models helps *exactly when you can check the answer
 cheaply and independently.* Code has a real oracle (run the tests), so the council wins. Tasks
