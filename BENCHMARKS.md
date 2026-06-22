@@ -34,7 +34,7 @@ Every problem, byte-identical oracle, real measured cost:
 
 ![Accuracy ladder on LiveCodeBench: Phi-4 one-shot 11.1% → +best-of-9+verifier 62.2% → +diverse council 75.6% → +frontier escalation (hybrid) 97.8%, above OpenRouter Fusion's 91.1%.](assets/lcb_accuracy_ladder.svg)
 
-![Cost to solve all 45 problems: OpenRouter Fusion $18.31 vs LLM-Jury hybrid $0.49 (~37× cheaper) vs LLM-Jury council $0.031 (~590× cheaper, $0 local).](assets/cost_chasm.svg)
+![Cost and accuracy on 45 hard problems: OpenRouter Fusion 91.1% at $18.31; LLM-Jury hybrid 97.8% at $0.49 (matches Fusion's accuracy, ~37× cheaper); LLM-Jury council 75.6% at $0.031 (~590× cheaper, $0 local).](assets/cost_chasm.svg)
 
 - **The hybrid's correct set is a strict superset of Fusion's.** It wins 3 problems Fusion gets
   wrong (`abc311_c` medium, `abc312_e` hard, `abc314_f` hard), loses **zero**, and both miss
