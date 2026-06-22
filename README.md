@@ -1,27 +1,48 @@
 # Litmus
 
+[![PyPI](https://img.shields.io/pypi/v/litmus-verify)](https://pypi.org/project/litmus-verify/)
+[![Python](https://img.shields.io/pypi/pyversions/litmus-verify)](https://pypi.org/project/litmus-verify/)
+[![CI](https://img.shields.io/github/actions/workflow/status/ajsai47/litmus/ci.yml?label=ci)](https://github.com/ajsai47/litmus/actions)
+[![dependencies](https://img.shields.io/badge/dependencies-0-success)](#)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+[Quickstart](#quickstart) · [How it works](#how-it-works) · [Benchmarks](#benchmarks) · [Write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb)
+
 **Local verified answers. Don't vote, verify.**
 
-Litmus runs a diverse council of small open models *on your own machine*, checks every
-attempt against a real verifier, and hands back the answer that **provably passes**. On hard
-code it matches — and beats — a frontier model's out-of-the-box answer. Fully local, fully
-free, fully private.
+A frontier API gives you one answer and asks you to trust it. Litmus gives you an answer it can
+**prove** — by running the tests — and does most of the work on your own laptop, for free.
 
-Zero dependencies. Stdlib only.
+It runs model-generated code through a real verifier and returns only what **provably passes** —
+not the answer that got the most votes. The result: a council of small open models on your machine,
+plus *one* opt-in frontier escalation on the hard minority, **matches a commercial frontier-model
+fusion on hard code — at ~38× lower cost.**
+
+> **Measured head-to-head — 45 hard LiveCodeBench problems, same oracle** ([full numbers + methodology →](BENCHMARKS.md)):
+
+| | Accuracy (n=45) | Cost | Solved locally |
+|---|---|---|---|
+| **Litmus hybrid** — local council + 1 opt-in frontier escalation | **44/45 (97.8%)** | **$0.49** | 75% |
+| OpenRouter Fusion — commercial frontier fusion | 41/45 (91.1%) | $18.31 | 0% |
+
+**Same accuracy, ~38× cheaper.** Litmus *matches* the commercial frontier fusion — a strict
+superset, solving every problem it does plus 3 — for **$0.49 vs $18.31**, running 75% of problems
+fully on your laptop and escalating only the hard minority to a single cloud call. *(The +3-problem
+edge is a clean sweep but not statistically significant at n=45 — McNemar p = 0.25 — so read
+accuracy as parity-or-better; the **cost gap is the decisive, measured win.**)*
+
+And the local council **alone**, no cloud at all, already beats a frontier model's one-shot on hard
+code — **75.6% vs 62.2%** on LiveCodeBench — and matches it on HumanEval+ (**97.6% vs 97.6%**).
+Free, private, zero dependencies (stdlib only).
 
 ```bash
-pip install litmus-verify
+pip install litmus-verify   # zero dependencies, stdlib only
+litmus demo                 # 5-second offline demo — no API key, nothing to download
 ```
 
-**Try it in 5 seconds — no API key, nothing to download:**
-
-```bash
-litmus demo
-```
-
-It runs the real generate → verify → escalate pipeline on a canned task with a built-in offline
-backend: a "weak" model returns a wrong answer, the verifier catches it, and the council's answer
-passes. That's the whole product, offline.
+`litmus demo` runs the real generate → verify → escalate pipeline on a canned task with a built-in
+offline backend: a "weak" model returns a wrong answer, the verifier catches it, and the council's
+answer passes. That's the whole product, offline.
 
 > **⚠️ Security.** Litmus *executes model-generated code* to verify it — that's the whole
 > point, and it's inherently risky. v0.1 isolates execution (scrubbed environment, isolated
@@ -30,57 +51,6 @@ passes. That's the whole product, offline.
 > container or VM.
 
 ---
-
-## Why
-
-A frontier API gives you one answer and asks you to trust it. Litmus gives you an answer it
-can **prove** — by running the tests. And it turns out three small models you can run for free
-on a laptop, plus a verifier, match or beat a frontier model on verifiable work:
-
-| Benchmark | Litmus (laptop council) | Frontier model, one shot |
-|---|---|---|
-| HumanEval+ (code) | **97.6%** | 97.6% |
-| LiveCodeBench (hard code) | **75.6%** | 62.2% |
-
-On *hard* code, the small-model council **beats** the frontier model by 13 points. The harder
-the problem, the bigger the win. ([Read the full write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb))
-
-And if you want frontier-fusion accuracy without the frontier-fusion bill, the opt-in **hybrid**
-adds one cloud escalation on just the problems the council can't verify: on a measured 45-problem
-run it **matched or beat the cloud market leader (OpenRouter Fusion) on every problem — 44/45 vs
-41/45 — at ~38× lower cost** ($0.49 vs $18.31). See [Benchmarks](#benchmarks).
-
-> Caveat, stated honestly: the frontier number is a single shot; Litmus spends best-of-N + a
-> verifier (your laptop's compute). The claim is "a laptop matches/beats the frontier model's
-> *out-of-the-box* answer," not "wins sample-for-sample." For someone choosing between their
-> laptop and an API bill, that's the comparison that matters. (The hybrid's +3-problem accuracy
-> edge over Fusion is a clean sweep but not statistically significant at n=45 — read it as parity
-> at a fraction of the cost; full caveats in [BENCHMARKS.md](BENCHMARKS.md).)
-
-## Benchmarks
-
-Measured head-to-head on the full 45 hard LiveCodeBench problems, judged by the same oracle
-([full numbers + methodology + caveats](BENCHMARKS.md)):
-
-| | Accuracy (n=45) | 95% CI | Cost | Local | Verified |
-|---|---|---|---|---|---|
-| **Litmus hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88%, 99.6%] | **$0.49** | ◐ | ✓ |
-| OpenRouter Fusion (cloud) | 41/45 (91.1%) | [79%, 97%] | $18.31 | ✗ | ✗ |
-| **Litmus council** (small open council, local) | 34/45 (75.6%) | [61%, 86%] | **$0.031** · free local | ✓ | ✓ |
-
-**The hybrid matches OpenRouter Fusion's accuracy — measured on all 45 — at ~38× less money**
-(44/45 vs 41/45, $0.49 vs $18.31). In fact the hybrid solves a *strict superset*: every problem
-Fusion gets, plus three more, losing none. It runs 75% of problems on a local council and escalates
-only the hard minority to a single frontier model. The plain **council**, with no cloud at all,
-gets 75.6% on hard code for 3 cents — and on easier code (HumanEval+) **matches frontier outright**
-(97.6%).
-
-Stated honestly: the **cost** gap is measured and decisive; the **accuracy** edge (+3 problems, 0
-losses) is a clean sweep on the sample but **not statistically significant** (McNemar p = 0.25 at
-n=45) — so read it as parity-or-better, not a proven win. And we *gave Fusion a token-budget
-advantage* on 5 problems it first truncated, which only helped it. "Correct" here means "passes the
-public sample tests," and the escalated ~25% do leave the device. Full caveats — confidence
-intervals, the public-test oracle, the fairness disclosure — are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Quickstart
 
@@ -127,6 +97,9 @@ verifier = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0)])
 
 ## How it works
 
+Three small models you can run for free on a laptop, plus a verifier, match or beat a frontier
+model on verifiable work. The engine is a tiered pipeline that *gates fusion on the verifier*:
+
 ```
 task + verifier
   → GENERATE   sample candidates across a cross-lineage small-model council
@@ -145,6 +118,24 @@ single cloud model. You pay for the frontier only on the problems that need it, 
 cheaply and independently.* Code has a real oracle (run the tests), so the council wins. Tasks
 with no oracle (open-ended reasoning) collapse to voting, where a council *hurts* — so there,
 Litmus uses the single best model. The verifier, not the model count, is what decides.
+
+## Benchmarks
+
+Full numbers behind the headline — the measured head-to-head on all 45 hard LiveCodeBench
+problems, judged by the same oracle ([methodology + caveats](BENCHMARKS.md)):
+
+| | Accuracy (n=45) | 95% CI | Cost | Local | Verified |
+|---|---|---|---|---|---|
+| **Litmus hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88%, 99.6%] | **$0.49** | ◐ | ✓ |
+| OpenRouter Fusion (cloud) | 41/45 (91.1%) | [79%, 97%] | $18.31 | ✗ | ✗ |
+| **Litmus council** (small open council, local) | 34/45 (75.6%) | [61%, 86%] | **$0.031** · free local | ✓ | ✓ |
+
+Stated honestly: the **cost** gap is measured and decisive; the **accuracy** edge (+3 problems, 0
+losses) is a clean sweep on the sample but **not statistically significant** (McNemar p = 0.25 at
+n=45) — so read it as parity-or-better, not a proven win. And we *gave Fusion a token-budget
+advantage* on 5 problems it first truncated, which only helped it. "Correct" here means "passes the
+public sample tests," and the escalated ~25% do leave the device. Full caveats — confidence
+intervals, the public-test oracle, the fairness disclosure — are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Backends
 
