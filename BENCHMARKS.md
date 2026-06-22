@@ -28,9 +28,9 @@ Every problem, byte-identical oracle, real measured cost:
 
 | Approach | Accuracy | 95% CI | Cost | Local | Private | Verified |
 |---|---|---|---|---|---|---|
-| **Litmus hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88.4%, 99.6%] | **$0.49** | ◐ | ◐ | ✓ |
+| **LLM-Jury hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88.4%, 99.6%] | **$0.49** | ◐ | ◐ | ✓ |
 | OpenRouter Fusion (closed, ~8-model panel + judge) | 41/45 (91.1%) | [79.3%, 96.5%] | $18.31 | ✗ | ✗ | ✗ |
-| **Litmus council** (small open council, local, no cloud) | 34/45 (75.6%) | [61.3%, 85.8%] | $0.031 · $0 local | ✓ | ✓ | ✓ |
+| **LLM-Jury council** (small open council, local, no cloud) | 34/45 (75.6%) | [61.3%, 85.8%] | $0.031 · $0 local | ✓ | ✓ | ✓ |
 
 - **The hybrid's correct set is a strict superset of Fusion's.** It wins 3 problems Fusion gets
   wrong (`abc311_c` medium, `abc312_e` hard, `abc314_f` hard), loses **zero**, and both miss
@@ -60,8 +60,8 @@ The first 12 problems (abc301–303), where both systems went 12/12 — kept for
 | Approach | Accuracy | Cost (12) |
 |---|---|---|
 | OpenRouter Fusion | 12/12 (100%) | $6.04 |
-| **Litmus hybrid** | 12/12 (100%) | **$0.169** |
-| Litmus council | 9/12 (75%) | $0.008 · $0 local |
+| **LLM-Jury hybrid** | 12/12 (100%) | **$0.169** |
+| LLM-Jury council | 9/12 (75%) | $0.008 · $0 local |
 
 The full-45 run above supersedes this slice; the n=12 cost ratio (~36×) is consistent with the
 measured ~38× on 45.
@@ -85,7 +85,7 @@ none dropped; Fusion misses it too).
 
 | Approach | Accuracy |
 |---|---|
-| **Litmus** (small council + verifier) | **97.6%** |
+| **LLM-Jury** (small council + verifier) | **97.6%** |
 | Frontier (DeepSeek) one shot | 97.6% |
 
 On easier code where the small models are capable, the council **matches frontier** outright with
@@ -148,7 +148,7 @@ the accuracy edge a clean sweep but below the significance bar, the cost edge de
 
 ## Reproduce it
 
-- Council / single-model numbers: `litmus reproduce lcb` and `litmus reproduce humaneval`.
+- Council / single-model numbers: `llmjury reproduce lcb` and `llmjury reproduce humaneval`.
 - Hybrid + Fusion comparison harnesses live in the research repo (`crucible-ablation/`):
   `hybrid_bench.py` (council + frontier escalation, same oracle) and `fusion_bench.py` (Fusion via
   `openrouter/fusion`). Both share byte-identical `oracle()` / `_norm()` and the same public-test

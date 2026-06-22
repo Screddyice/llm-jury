@@ -1,4 +1,4 @@
-"""The Litmus engine: generate -> verify -> select -> escalate.
+"""The LLM-Jury engine: generate -> verify -> select -> escalate.
 
 Default to the single best model + best-of-k (fast, fits memory). Escalate to the
 full diverse council only when nothing verifies — that's the regime where the
@@ -92,12 +92,12 @@ class Engine:
 
 
 def solve(task, verifier, backend=None, **kw):
-    """Litmus in one call. Defaults to the OpenRouter backend; pass backend= for Ollama."""
-    if hasattr(os, "geteuid") and os.geteuid() == 0 and os.environ.get("LITMUS_ALLOW_ROOT") != "1":
+    """LLM-Jury in one call. Defaults to the OpenRouter backend; pass backend= for Ollama."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and os.environ.get("LLMJURY_ALLOW_ROOT") != "1":
         raise PermissionError(
-            "Litmus refuses to run as root — it executes model-generated code. "
-            "Set LITMUS_ALLOW_ROOT=1 to override (not recommended).")
+            "LLM-Jury refuses to run as root — it executes model-generated code. "
+            "Set LLMJURY_ALLOW_ROOT=1 to override (not recommended).")
     if backend is None:
         from .backends import OpenRouterBackend
-        backend = OpenRouterBackend(cache_path="~/.litmus/cache.jsonl")
+        backend = OpenRouterBackend(cache_path="~/.llmjury/cache.jsonl")
     return Engine(backend, **kw).solve(task, verifier)

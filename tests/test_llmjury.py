@@ -1,11 +1,11 @@
 """Offline tests — no backend, no network. Covers the two confirmed extract_code bugs
-and the per-line output comparison. Run: `python tests/test_litmus.py` (or pytest)."""
+and the per-line output comparison. Run: `python tests/test_llmjury.py` (or pytest)."""
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from litmus.verifiers import (  # noqa: E402
+from llmjury.verifiers import (  # noqa: E402
     extract_code, _same_output, FunctionalCodeVerifier, StdioCodeVerifier,
 )
 
@@ -54,14 +54,14 @@ def test_stdio_verifier_pass_and_fail():
 
 def test_sandbox_blocks_secret_read():
     # The scrubbed env should keep a secret out of the child process.
-    os.environ["LITMUS_TEST_SECRET"] = "topsecret"
+    os.environ["LLMJURY_TEST_SECRET"] = "topsecret"
     try:
         cases = [{"input": "", "output": "none"}]
         # prints the secret if it leaks, else "none"
-        prog = ("```python\nimport os\nprint(os.environ.get('LITMUS_TEST_SECRET', 'none'))\n```")
+        prog = ("```python\nimport os\nprint(os.environ.get('LLMJURY_TEST_SECRET', 'none'))\n```")
         assert StdioCodeVerifier(cases).verify(prog)  # passes only because secret is absent
     finally:
-        del os.environ["LITMUS_TEST_SECRET"]
+        del os.environ["LLMJURY_TEST_SECRET"]
 
 
 class _FakeBackend:
@@ -82,16 +82,16 @@ _BAD = "```python\ndef add(a, b):\n    return a - b\n```"
 
 
 def test_engine_single_when_best_solves():
-    from litmus.engine import Engine
-    from litmus.verifiers import FunctionalCodeVerifier
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
     eng = Engine(_FakeBackend({"best": [_GOOD]}), panel=["best", "other"], best="best", k=2)
     r = eng.solve("add", FunctionalCodeVerifier(_TESTS, "add"))
     assert r.verified and r.stage == "single" and r.model == "best"
 
 
 def test_engine_escalates_to_council():
-    from litmus.engine import Engine
-    from litmus.verifiers import FunctionalCodeVerifier
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
     # best always wrong; the other council member is correct -> must escalate and pick it
     eng = Engine(_FakeBackend({"best": [_BAD], "other": [_GOOD]}),
                  panel=["best", "other"], best="best", k=2)
@@ -100,8 +100,8 @@ def test_engine_escalates_to_council():
 
 
 def test_engine_unverified_when_nobody_solves():
-    from litmus.engine import Engine
-    from litmus.verifiers import FunctionalCodeVerifier
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
     eng = Engine(_FakeBackend({"best": [_BAD], "other": [_BAD]}),
                  panel=["best", "other"], best="best", k=2)
     r = eng.solve("add", FunctionalCodeVerifier(_TESTS, "add"))
@@ -125,15 +125,15 @@ def test_functional_verifier_from_cases():
 
 
 def test_demo_backend_escalates_and_verifies():
-    from litmus.engine import Engine
-    from litmus.backends import DemoBackend
+    from llmjury.engine import Engine
+    from llmjury.backends import DemoBackend
     r = Engine(DemoBackend(), k=2).solve(
         "add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
     assert r.verified and r.stage == "council" and r.model == "demo-council"
 
 
 def test_engine_frontier_escalation():
-    from litmus.engine import Engine
+    from llmjury.engine import Engine
     # local council fails everything; a separate frontier backend solves it on the last tier
     council = _FakeBackend({"best": [_BAD], "other": [_BAD]})
     frontier_bk = _FakeBackend({"front": [_GOOD]})

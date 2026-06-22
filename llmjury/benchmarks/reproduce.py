@@ -1,13 +1,13 @@
-"""Reproduce the published benchmark numbers with the Litmus engine.
+"""Reproduce the published benchmark numbers with the LLM-Jury engine.
 
 Runs the council on a bundled benchmark slice and reports how many problems the
 single best model solves (verified best-of-k) versus what the diverse council adds
 on escalation — the exact "council adds coverage" story from the write-up. Uses the
 response cache, so reruns are near-free.
 
-    litmus reproduce humaneval        # full bundled slice (25)
-    litmus reproduce lcb --n 5        # quick 5-problem check
-    litmus reproduce lcb --backend ollama   # run it locally
+    llmjury reproduce humaneval        # full bundled slice (25)
+    llmjury reproduce lcb --n 5        # quick 5-problem check
+    llmjury reproduce lcb --backend ollama   # run it locally
 """
 import os
 import json
@@ -17,7 +17,7 @@ from ..engine import Engine
 from ..verifiers import FunctionalCodeVerifier, StdioCodeVerifier
 
 DATA = os.path.join(os.path.dirname(__file__), "data")
-CACHE = "~/.litmus/cache.jsonl"
+CACHE = "~/.llmjury/cache.jsonl"
 
 REFERENCE = {
     "humaneval": "Published full-run (larger sample): council 97.6% = frontier (DeepSeek) one-shot 97.6%  [HumanEval+, n=82]",
@@ -61,7 +61,7 @@ def run(which, backend="openrouter", n=None, k=4, pace=0.0):
 
     nn = len(probs)
     total = single + council
-    print(f"\n== litmus reproduce: {which}  (n={nn}, backend={backend}, k={k}) ==")
+    print(f"\n== llmjury reproduce: {which}  (n={nn}, backend={backend}, k={k}) ==")
     print(f"  single best model + verified best-of-{k}:   {single}/{nn} = {single/nn:.1%}")
     print(f"  + diverse council (escalation):            +{council}  ->  {total}/{nn} = {total/nn:.1%}")
     print(f"\n  This run reproduces the METHOD on a bundled {nn}-problem slice.")

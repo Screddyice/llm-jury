@@ -1,4 +1,4 @@
-"""Verifiers — the heart of Litmus.
+"""Verifiers — the heart of LLM-Jury.
 
 A verifier checks a candidate WITHOUT being told the answer, so it can SELECT the
 right one from many attempts. For code that's just: run it against tests and see if
@@ -169,12 +169,12 @@ class FunctionalCodeVerifier(Verifier):
             else "def check(candidate):\n" + textwrap.indent(self.test or "pass", "    ")
         program = (
             f"{self.header}\n{code}\n\n{test}\n\n"
-            f"check({self.entry_point})\nprint('LITMUS_OK')"
+            f"check({self.entry_point})\nprint('LLMJURY_OK')"
         )
         try:
-            with tempfile.TemporaryDirectory(prefix="litmus-") as wd:
+            with tempfile.TemporaryDirectory(prefix="llmjury-") as wd:
                 p = _run([sys.executable, "-"], program, self.timeout, wd)
-            return p.returncode == 0 and "LITMUS_OK" in p.stdout
+            return p.returncode == 0 and "LLMJURY_OK" in p.stdout
         except Exception:
             return False
 
@@ -193,7 +193,7 @@ class StdioCodeVerifier(Verifier):
         if not code:
             return False
         try:
-            with tempfile.TemporaryDirectory(prefix="litmus-") as wd:
+            with tempfile.TemporaryDirectory(prefix="llmjury-") as wd:
                 path = os.path.join(wd, "sol.py")
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(code)

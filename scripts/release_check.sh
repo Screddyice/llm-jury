@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Litmus release-readiness gate (fast). Exits 0 only when the repo is release-ready:
+# LLM-Jury release-readiness gate (fast). Exits 0 only when the repo is release-ready:
 # required files present, working tree clean, and everything pushed to origin/main.
 # (Build/install is verified separately during release prep, not on every gate run.)
 set -uo pipefail
-REPO="/Users/ajsai47/CC/litmus"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO" 2>/dev/null || { echo "FAIL: cannot cd $REPO"; exit 1; }
 
 for f in CHANGELOG.md CONTRIBUTING.md LICENSE README.md pyproject.toml; do

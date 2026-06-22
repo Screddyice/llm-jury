@@ -55,11 +55,11 @@ class OpenRouterBackend(Backend):
         if not self.key:
             raise RuntimeError(
                 "No OpenRouter API key. Set OPENROUTER_API_KEY, pass api_key=, "
-                "or put it in ~/.litmus/.env — or use the local Ollama backend.")
+                "or put it in ~/.llmjury/.env — or use the local Ollama backend.")
 
     @staticmethod
     def _from_env_file():
-        p = os.path.expanduser("~/.litmus/.env")
+        p = os.path.expanduser("~/.llmjury/.env")
         if os.path.exists(p):
             with open(p, encoding="utf-8") as fh:
                 for line in fh:
@@ -80,8 +80,8 @@ class OpenRouterBackend(Backend):
         h = {
             "Authorization": f"Bearer {self.key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/ajsai47/litmus",
-            "X-Title": "litmus",
+            "HTTP-Referer": "https://github.com/ajsai47/llm-jury",
+            "X-Title": "llmjury",
         }
         for attempt in range(4):
             try:
@@ -90,11 +90,11 @@ class OpenRouterBackend(Backend):
                     d = json.load(r)
                 # OpenRouter can return HTTP 200 with an error body (rate-limit, moderation, ...).
                 if isinstance(d, dict) and d.get("error"):
-                    sys.stderr.write(f"[litmus] openrouter {model}: {d['error']}\n")
+                    sys.stderr.write(f"[llmjury] openrouter {model}: {d['error']}\n")
                     return ""
                 choices = d.get("choices") or []
                 if not choices:
-                    sys.stderr.write(f"[litmus] openrouter {model}: empty response\n")
+                    sys.stderr.write(f"[llmjury] openrouter {model}: empty response\n")
                     return ""
                 m = choices[0].get("message", {}) or {}
                 return m.get("content") or m.get("reasoning") or ""
@@ -102,10 +102,10 @@ class OpenRouterBackend(Backend):
                 if e.code in _RETRYABLE:
                     time.sleep(3 * (attempt + 1))
                     continue
-                sys.stderr.write(f"[litmus] openrouter {model}: {_HTTP_MSG.get(e.code, f'HTTP {e.code}')}\n")
+                sys.stderr.write(f"[llmjury] openrouter {model}: {_HTTP_MSG.get(e.code, f'HTTP {e.code}')}\n")
                 return ""
             except urllib.error.URLError as e:
-                sys.stderr.write(f"[litmus] cannot reach OpenRouter ({e.reason}) — check your connection\n")
+                sys.stderr.write(f"[llmjury] cannot reach OpenRouter ({e.reason}) — check your connection\n")
                 return ""
             except Exception:
                 time.sleep(3 * (attempt + 1))
@@ -113,7 +113,7 @@ class OpenRouterBackend(Backend):
 
 
 class DemoBackend(Backend):
-    """Offline, canned backend so `litmus demo` runs with no API key and no Ollama —
+    """Offline, canned backend so `llmjury demo` runs with no API key and no Ollama —
     while still exercising the REAL generate->verify->select->escalate pipeline and the
     REAL code-executing verifier. `demo-weak` returns a wrong answer and `demo-council` a
     right one, so the demo actually shows the council recovering what one model missed.
@@ -150,17 +150,17 @@ class OllamaBackend(Backend):
                 with urllib.request.urlopen(req, timeout=600) as r:
                     d = json.load(r)
                 if isinstance(d, dict) and d.get("error"):
-                    sys.stderr.write(f"[litmus] ollama {model}: {d['error']}\n")
+                    sys.stderr.write(f"[llmjury] ollama {model}: {d['error']}\n")
                     return ""
                 return d.get("message", {}).get("content", "") or ""
             except urllib.error.HTTPError as e:
                 sys.stderr.write(
-                    f"[litmus] ollama {model} HTTP {e.code} (pulled it? try: ollama pull {model})\n")
+                    f"[llmjury] ollama {model} HTTP {e.code} (pulled it? try: ollama pull {model})\n")
                 return ""
             except urllib.error.URLError as e:
                 # Connection refused = Ollama isn't running. Don't burn retries silently.
                 sys.stderr.write(
-                    f"[litmus] cannot reach Ollama at {self.host} — is `ollama serve` running? ({e.reason})\n")
+                    f"[llmjury] cannot reach Ollama at {self.host} — is `ollama serve` running? ({e.reason})\n")
                 return ""
             except Exception:
                 time.sleep(2 * (attempt + 1))

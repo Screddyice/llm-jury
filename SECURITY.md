@@ -1,6 +1,6 @@
 # Security Policy
 
-Litmus **executes model-generated code** to verify it — that is the core mechanism, and it is
+LLM-Jury **executes model-generated code** to verify it — that is the core mechanism, and it is
 inherently dangerous. Read this before pointing it at anything you don't trust.
 
 ## What v0.1 does to contain execution
@@ -14,7 +14,7 @@ Each candidate runs in a subprocess with:
 - a hard **timeout** that kills the entire **process group** (so forked grandchildren are reaped),
 - **captured output capped at 1 MiB** (a print-bomb can't OOM the parent).
 
-It also **refuses to run as root** unless you set `LITMUS_ALLOW_ROOT=1`.
+It also **refuses to run as root** unless you set `LLMJURY_ALLOW_ROOT=1`.
 
 ## What v0.1 is NOT
 
@@ -22,7 +22,7 @@ This is **not a real sandbox.** No containers, namespaces, seccomp, or VM. The n
 blocked, and memory is not hard-capped (a reliable `RLIMIT_AS` is fragile on macOS). A determined
 adversary controlling the model output, the task, or the tests can likely still do harm.
 
-**For untrusted input, run Litmus inside a container or a VM.** Don't run it as root, and don't run
+**For untrusted input, run LLM-Jury inside a container or a VM.** Don't run it as root, and don't run
 it on a machine holding secrets you can't afford to expose.
 
 ## Reporting a vulnerability

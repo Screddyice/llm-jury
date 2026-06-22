@@ -1,8 +1,8 @@
-# Litmus
+# LLM-Jury
 
-[![PyPI](https://img.shields.io/pypi/v/litmus-verify)](https://pypi.org/project/litmus-verify/)
-[![Python](https://img.shields.io/pypi/pyversions/litmus-verify)](https://pypi.org/project/litmus-verify/)
-[![CI](https://img.shields.io/github/actions/workflow/status/ajsai47/litmus/ci.yml?label=ci)](https://github.com/ajsai47/litmus/actions)
+[![PyPI](https://img.shields.io/pypi/v/llmjury)](https://pypi.org/project/llmjury/)
+[![Python](https://img.shields.io/pypi/pyversions/llmjury)](https://pypi.org/project/llmjury/)
+[![CI](https://img.shields.io/github/actions/workflow/status/ajsai47/llm-jury/ci.yml?label=ci)](https://github.com/ajsai47/llm-jury/actions)
 [![dependencies](https://img.shields.io/badge/dependencies-0-success)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -10,7 +10,7 @@
 
 **Local verified answers. Don't vote, verify.**
 
-A frontier API gives you one answer and asks you to trust it. Litmus gives you an answer it can
+A frontier API gives you one answer and asks you to trust it. LLM-Jury gives you an answer it can
 **prove** — by running the tests — and does most of the work on your own laptop, for free.
 
 It runs model-generated code through a real verifier and returns only what **provably passes** —
@@ -22,12 +22,12 @@ fusion on hard code — at ~38× lower cost.**
 
 | | Accuracy (n=45) | Cost | Solved locally |
 |---|---|---|---|
-| **Litmus hybrid** — local council + 1 opt-in frontier escalation | **44/45 (97.8%)** | **$0.49** | 75% |
+| **LLM-Jury hybrid** — local council + 1 opt-in frontier escalation | **44/45 (97.8%)** | **$0.49** | 75% |
 | OpenRouter Fusion — commercial frontier fusion | 41/45 (91.1%) | $18.31 | 0% |
 
-![Cost vs. accuracy on 45 hard LiveCodeBench problems — Litmus hybrid 44/45 at $0.49, up-and-left of OpenRouter Fusion 41/45 at $18.31 (~38× cheaper); Litmus council 75.6% at ~$0.03, local and free.](assets/cost_vs_accuracy.svg)
+![Cost vs. accuracy on 45 hard LiveCodeBench problems — LLM-Jury hybrid 44/45 at $0.49, up-and-left of OpenRouter Fusion 41/45 at $18.31 (~38× cheaper); LLM-Jury council 75.6% at ~$0.03, local and free.](assets/cost_vs_accuracy.svg)
 
-**Same accuracy, ~38× cheaper.** Litmus *matches* the commercial frontier fusion — a strict
+**Same accuracy, ~38× cheaper.** LLM-Jury *matches* the commercial frontier fusion — a strict
 superset, solving every problem it does plus 3 — for **$0.49 vs $18.31**, running 75% of problems
 fully on your laptop and escalating only the hard minority to a single cloud call. *(The +3-problem
 edge is a clean sweep but not statistically significant at n=45 — McNemar p = 0.25 — so read
@@ -38,15 +38,15 @@ code — **75.6% vs 62.2%** on LiveCodeBench — and matches it on HumanEval+ (*
 Free, private, zero dependencies (stdlib only).
 
 ```bash
-pip install litmus-verify   # zero dependencies, stdlib only
-litmus demo                 # 5-second offline demo — no API key, nothing to download
+pip install llmjury   # zero dependencies, stdlib only
+llmjury demo                 # 5-second offline demo — no API key, nothing to download
 ```
 
-`litmus demo` runs the real generate → verify → escalate pipeline on a canned task with a built-in
+`llmjury demo` runs the real generate → verify → escalate pipeline on a canned task with a built-in
 offline backend: a "weak" model returns a wrong answer, the verifier catches it, and the council's
 answer passes. That's the whole product, offline.
 
-> **⚠️ Security.** Litmus *executes model-generated code* to verify it — that's the whole
+> **⚠️ Security.** LLM-Jury *executes model-generated code* to verify it — that's the whole
 > point, and it's inherently risky. v0.1 isolates execution (scrubbed environment, isolated
 > temp directory, CPU/file-size limits) but is **not a real sandbox**. Don't run untrusted
 > tasks on a machine with secrets, and don't run as root. For real isolation, run it inside a
@@ -60,21 +60,21 @@ answer passes. That's the whole product, offline.
 
 ```bash
 # functional tests (the body of a check(candidate) function)
-litmus solve --task examples/add_task.txt --tests examples/add_test.py --entry-point add
+llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-point add
 
 # or competitive-programming style (stdin/stdout cases as JSON)
-litmus solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json
+llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json
 
 # hybrid: run the local council, and escalate ONLY what it can't verify to one
 # frontier model — Fusion-class accuracy, a frontier call on the hard minority, not on everything
-litmus solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
+llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
     --backend ollama --frontier deepseek/deepseek-v4-pro   # needs OPENROUTER_API_KEY
 ```
 
 **Python:**
 
 ```python
-from litmus import solve, FunctionalCodeVerifier, OllamaBackend
+from llmjury import solve, FunctionalCodeVerifier, OllamaBackend
 
 task = "Write a function `add(a, b)` that returns the sum of two numbers."
 tests = "def check(c):\n    assert c(2, 3) == 5\n    assert c(-1, 1) == 0\n"
@@ -90,12 +90,12 @@ print(result.stage)      # "single"  (escalates to "council" on hard problems)
 **Bring your own tests** — skip the `check()` string entirely with `(args, expected)` pairs:
 
 ```python
-from litmus import FunctionalCodeVerifier
+from llmjury import FunctionalCodeVerifier
 verifier = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0)])
 ```
 
 (`--tests` also accepts either a full `def check(candidate): ...` or just its body. And
-`litmus solve --json` emits a machine-readable result for piping into CI/agents.)
+`llmjury solve --json` emits a machine-readable result for piping into CI/agents.)
 
 ## How it works
 
@@ -116,10 +116,10 @@ accuracy: the common case runs **one** model fast, hard problems load the full l
 if you opt in with `--frontier` — the small hard minority the council can't verify escalates to a
 single cloud model. You pay for the frontier only on the problems that need it, not on every call.
 
-**The rule Litmus is built on:** combining models helps *exactly when you can check the answer
+**The rule LLM-Jury is built on:** combining models helps *exactly when you can check the answer
 cheaply and independently.* Code has a real oracle (run the tests), so the council wins. Tasks
 with no oracle (open-ended reasoning) collapse to voting, where a council *hurts* — so there,
-Litmus uses the single best model. The verifier, not the model count, is what decides.
+LLM-Jury uses the single best model. The verifier, not the model count, is what decides.
 
 ## Benchmarks
 
@@ -128,9 +128,9 @@ problems, judged by the same oracle ([methodology + caveats](BENCHMARKS.md)):
 
 | | Accuracy (n=45) | 95% CI | Cost | Local | Verified |
 |---|---|---|---|---|---|
-| **Litmus hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88%, 99.6%] | **$0.49** | ◐ | ✓ |
+| **LLM-Jury hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88%, 99.6%] | **$0.49** | ◐ | ✓ |
 | OpenRouter Fusion (cloud) | 41/45 (91.1%) | [79%, 97%] | $18.31 | ✗ | ✗ |
-| **Litmus council** (small open council, local) | 34/45 (75.6%) | [61%, 86%] | **$0.031** · free local | ✓ | ✓ |
+| **LLM-Jury council** (small open council, local) | 34/45 (75.6%) | [61%, 86%] | **$0.031** · free local | ✓ | ✓ |
 
 Stated honestly: the **cost** gap is measured and decisive; the **accuracy** edge (+3 problems, 0
 losses) is a clean sweep on the sample but **not statistically significant** (McNemar p = 0.25 at
@@ -149,14 +149,14 @@ intervals, the public-test oracle, the fairness disclosure — are in [BENCHMARK
 
 A diverse, cross-lineage panel (different labs → different mistakes) is the point. The defaults
 are Phi-4 (Microsoft) + Gemma-3-12B (Google) + Llama-3.1-8B (Meta); swap your own in
-`litmus.panels` or by passing `panel=[...]` to `Engine`.
+`llmjury.panels` or by passing `panel=[...]` to `Engine`.
 
 ## Reproduce the benchmarks
 
 ```bash
-litmus reproduce humaneval            # bundled 25-problem slice
-litmus reproduce lcb --n 5            # quick check
-litmus reproduce lcb --backend ollama  # run it locally
+llmjury reproduce humaneval            # bundled 25-problem slice
+llmjury reproduce lcb --n 5            # quick check
+llmjury reproduce lcb --backend ollama  # run it locally
 ```
 
 It runs the council on a bundled benchmark slice and reports how many problems the single best
@@ -167,7 +167,7 @@ figures are the larger full runs from the write-up.)
 ## Status
 
 `v0.1` — working engine, code verifiers (functional + stdin/stdout), Ollama + OpenRouter
-backends, escalating council, and `litmus reproduce`. Next: a real sandbox (container) for
+backends, escalating council, and `llmjury reproduce`. Next: a real sandbox (container) for
 untrusted input, more verifiers (math, citations), and a task classifier that picks the
 strategy automatically.
 

@@ -1,4 +1,4 @@
-"""Litmus — a local engine that returns answers it can prove are right.
+"""LLM-Jury — a local engine that returns answers it can prove are right.
 
 Don't vote, verify: sample a diverse small-model council, run a real verifier,
 return the answer that provably passes. Fully local (Ollama) or cloud (OpenRouter).

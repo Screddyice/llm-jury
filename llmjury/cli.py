@@ -1,4 +1,4 @@
-"""litmus CLI: `litmus solve`, `litmus reproduce`, `litmus --version`."""
+"""llmjury CLI: `llmjury solve`, `llmjury reproduce`, `llmjury --version`."""
 import os
 import sys
 import json
@@ -8,10 +8,10 @@ from . import __version__
 from .engine import Engine
 from .verifiers import FunctionalCodeVerifier, StdioCodeVerifier
 
-CACHE = os.path.expanduser("~/.litmus/cache.jsonl")
+CACHE = os.path.expanduser("~/.llmjury/cache.jsonl")
 
 WARNING = (
-    "[litmus] note: verification runs the model-generated code. v0.1 isolates it "
+    "[llmjury] note: verification runs the model-generated code. v0.1 isolates it "
     "(scrubbed env, temp dir, CPU/file limits) but is NOT a real sandbox — don't point "
     "it at untrusted tasks on a machine with secrets. Use a container/VM for that.\n")
 
@@ -33,9 +33,9 @@ def _backend(name):
 
 
 def _refuse_root():
-    if hasattr(os, "geteuid") and os.geteuid() == 0 and os.environ.get("LITMUS_ALLOW_ROOT") != "1":
-        sys.exit("error: refusing to run as root — Litmus executes model-generated code. "
-                 "Set LITMUS_ALLOW_ROOT=1 to override (not recommended).")
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and os.environ.get("LLMJURY_ALLOW_ROOT") != "1":
+        sys.exit("error: refusing to run as root — LLM-Jury executes model-generated code. "
+                 "Set LLMJURY_ALLOW_ROOT=1 to override (not recommended).")
 
 
 def cmd_solve(a):
@@ -50,7 +50,7 @@ def cmd_solve(a):
     elif a.tests:
         ep = a.entry_point or "solve"
         if not a.entry_point:
-            sys.stderr.write("[litmus] note: no --entry-point given; assuming 'solve'. "
+            sys.stderr.write("[llmjury] note: no --entry-point given; assuming 'solve'. "
                              "Pass --entry-point if your function has another name.\n")
         verifier = FunctionalCodeVerifier(_read(a.tests), ep)
     else:
@@ -73,7 +73,7 @@ def cmd_solve(a):
     else:
         status = "VERIFIED" if r.verified else "UNVERIFIED (no candidate passed)"
         sys.stderr.write(
-            f"# litmus: {status}  [stage={r.stage}, model={r.model}, attempts={r.attempts}]\n\n")
+            f"# llmjury: {status}  [stage={r.stage}, model={r.model}, attempts={r.attempts}]\n\n")
         if r.verified:
             print(r.answer)            # only verified code reaches stdout
         else:
@@ -84,12 +84,12 @@ def cmd_solve(a):
 def cmd_demo(a):
     from .backends import DemoBackend
     from .verifiers import FunctionalCodeVerifier
-    sys.stderr.write("[litmus] demo — offline, no API key, no Ollama. "
+    sys.stderr.write("[llmjury] demo — offline, no API key, no Ollama. "
                      "Running the real pipeline on a canned task...\n")
     task = "Write a function `add(a, b)` that returns the sum of two numbers."
     verifier = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0), ((0, 0), 0)])
     r = Engine(DemoBackend(), k=2).solve(task, verifier)
-    sys.stderr.write(f"# litmus: {'VERIFIED' if r.verified else 'UNVERIFIED'}  "
+    sys.stderr.write(f"# llmjury: {'VERIFIED' if r.verified else 'UNVERIFIED'}  "
                      f"[stage={r.stage}, model={r.model}, attempts={r.attempts}]\n\n")
     print(r.answer)
     sys.stderr.write("\n(The 'weak' model returned a-b; the verifier caught it; the council's "
@@ -103,9 +103,9 @@ def cmd_reproduce(a):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="litmus",
+    p = argparse.ArgumentParser(prog="llmjury",
                                 description="Local verified answers. Don't vote, verify.")
-    p.add_argument("--version", action="version", version=f"litmus {__version__}")
+    p.add_argument("--version", action="version", version=f"llmjury {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("solve", help="solve a verifiable task with a verified small-model council")
