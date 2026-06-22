@@ -2,12 +2,14 @@
 
 Head-to-head on the **same problems, judged by the same oracle**. Two honest headlines:
 
-1. **Cost (measured, rock-solid):** the local-first **hybrid** ties OpenRouter Fusion on a
-   12-problem head-to-head — both 12/12 — for **~36× less money** ($0.169 vs $6.04). On the full
-   45 it scores **44/45 (97.8%)** for **$0.49**, an **extrapolated ~46×** cost advantage.
-2. **What we do *not* claim:** that Litmus is *more accurate* than a frontier cloud fusion. A
-   12/12-vs-12/12 tie on n=12 cannot prove accuracy parity (the sample is too small — see the CI
-   caveat). The cost gap is measured; the accuracy comparison is a tie on a small sample, no more.
+1. **The hybrid matches the cloud leader's accuracy — now measured, not extrapolated.** On a
+   40-problem head-to-head where OpenRouter Fusion actually ran, the local-first hybrid scores
+   **39/40 (97.5%)** vs Fusion's **37/40 (92.5%)** — a statistical tie (the hybrid is nominally
+   ahead by 2; the confidence intervals overlap) — for **~35× less money** ($0.49 vs $16.96).
+2. **What we still do *not* claim:** that the hybrid is *more* accurate than Fusion. +2 problems
+   at n=40 is within noise. The honest claim is **parity at a fraction of the cost**, and now the
+   accuracy comparison is backed by a real 40-problem run with genuine statistical power — not the
+   earlier n=12 tie that couldn't resolve anything.
 
 The numbers below, and the caveats that bound them, are why.
 
@@ -19,24 +21,48 @@ The numbers below, and the caveats that bound them, are why.
 | **Hybrid** | Council, then escalate *only* the problems the verifier can't pass to **one** frontier model (best-of-4), re-verified | ✓ for ~75%; cloud for the hard ~25% | partial | ✓ |
 | **OpenRouter Fusion** | Closed cloud: fans out to ~8 frontier models + a judge, on **every** problem | ✗ | ✗ | ✗ |
 
-## Hard code — LiveCodeBench, 12-problem head-to-head
+## Measured head-to-head — LiveCodeBench, 40 problems
 
-The only direct, same-problems, same-oracle comparison with Fusion (problems abc301–303, the
-first 12 in sequence):
+The full comparison, same problems, byte-identical oracle. (Fusion ran on 40 of the 45; the last
+5 hit a credit cap and never executed — see below. They are **excluded from both arms** rather
+than scored as Fusion losses.)
 
-| Approach | Accuracy | Cost (12 problems) | Local | Private | Verified |
-|---|---|---|---|---|---|
-| Single frontier model (DeepSeek V4-Pro), one shot | 66.7% | ~$0.12 | ✗ | ✗ | ✗ |
-| OpenRouter Fusion (closed, frontier panel + judge) | 12/12 (100%) | **$6.04** | ✗ | ✗ | ✗ |
-| **Litmus hybrid** (local council + 1 frontier escalation) | 12/12 (100%) | **$0.169** | ◐ | ◐ | ✓ |
-| **Litmus council** (small open council, no escalation) | 9/12 (75%) | **$0.008** · $0 local | ✓ | ✓ | ✓ |
+| Approach | Accuracy | 95% CI | Cost | Local | Private | Verified |
+|---|---|---|---|---|---|---|
+| **Litmus hybrid** (council + 1 frontier escalation) | **39/40 (97.5%)** | [87.1%, 99.6%] | **$0.49** | ◐ | ◐ | ✓ |
+| OpenRouter Fusion (closed, ~8-model panel + judge) | 37/40 (92.5%) | [80.1%, 97.4%] | $16.96 | ✗ | ✗ | ✗ |
+| **Litmus council** (small open council, local, no cloud) | 34/45 (75.6%) | [60.8%, 85.9%] | $0.031 · $0 local | ✓ | ✓ | ✓ |
 
-**Litmus hybrid ties OpenRouter Fusion (both 12/12) at ~36× lower cost** ($0.169 vs $6.04 —
-$0.008 council + $0.161 frontier). The cost ratio is measured to the cent. The accuracy is a
-**tie on n=12** — see the caveat: this sample cannot resolve which system is actually more
-accurate; each arm's 95% confidence interval runs roughly 74–100%.
+- **The hybrid is tied with Fusion, nominally ahead by 2, at ~35× lower cost.** It solves two
+  problems Fusion gets wrong (`abc311_c`, `abc314_f`); both miss exactly one genuinely brutal
+  problem (`abc314_e`). The cost figures are measured to the cent — the hybrid's $0.49 covers all
+  45 problems; Fusion's $16.96 covers the 40 it completed, so ~35× is if anything conservative.
+- **Statistical honesty:** 39/40 vs 37/40 is a 2-problem gap with overlapping CIs — read it as a
+  *tie*, not a win. But it is a tie established on **n=40 measured**, which is the upgrade: the
+  accuracy comparison is no longer extrapolated or underpowered.
 
-## Hybrid escalation — full LiveCodeBench (45 medium/hard problems)
+### The credit cap (full disclosure)
+
+Fusion's run exhausted its OpenRouter credits at $16.96, and the last **5 problems never executed**
+(HTTP 402 → empty responses): `abc312_e`, `abc312_f`, `abc313_b`, `abc314_d`, `abc315_d`. Counting
+those as Fusion failures would have produced a dishonest "37/45 = 82%." They are un-run, not wrong,
+so they are dropped from **both** systems. (For the record, the hybrid solved all 5 — so completing
+the Fusion run could only hold or widen the hybrid's edge, never reverse it.)
+
+## 12-problem head-to-head (the original direct subset)
+
+The first 12 problems (abc301–303), where both systems went 12/12 — kept for continuity:
+
+| Approach | Accuracy | Cost (12) |
+|---|---|---|
+| OpenRouter Fusion | 12/12 (100%) | $6.04 |
+| **Litmus hybrid** | 12/12 (100%) | **$0.169** |
+| Litmus council | 9/12 (75%) | $0.008 · $0 local |
+
+On this slice the cost ratio is ~36×. The 40-problem run above supersedes it for the accuracy
+comparison (n=12 had no power to resolve a tie).
+
+## Hybrid escalation — how the 44/45 is built
 
 The council solves 34/45 locally. The hybrid escalates **only the 11 it can't verify** to one
 frontier model (DeepSeek V4-Pro, best-of-4), re-checked by the same oracle:
@@ -45,16 +71,11 @@ frontier model (DeepSeek V4-Pro, best-of-4), re-checked by the same oracle:
 |---|---|---|
 | Council alone (local, verified best-of-9) | 34/45 (75.6%) | $0.031 · $0 local |
 | **+ frontier escalation on the 11 failures** | **+10 recovered → 44/45 (97.8%)** | + $0.456 |
-| **Hybrid total** | **44/45 (97.8%)** · 95% CI ≈ 88–100% | **$0.487** |
-| OpenRouter Fusion (*extrapolated* to 45) | — | **~$22.65** |
+| **Hybrid total (all 45)** | **44/45 (97.8%)** · 95% CI ≈ 88–100% | **$0.487** |
 
-- **34 solved locally** (free, private); **10 of the 11 council failures recovered** by one
-  frontier escalation; one genuine remaining failure (`abc314_e` — all 4 frontier samples
-  returned real code, none dropped).
-- **~46× cheaper than Fusion — extrapolated.** Fusion was run only on the first 12 problems;
-  $22.65 = ($6.04 / 12) × 45. The difficulty mix is close (first-12: 42% hard; full-45: 40%
-  hard), so the projection is reasonable but **was not measured on the other 33**. The 36× on the
-  12-problem head-to-head *is* measured.
+**34 solved locally** (free, private); **10 of the 11 council failures recovered** by one frontier
+escalation; one genuine remaining failure (`abc314_e` — all 4 frontier samples returned real code,
+none dropped; Fusion misses it too).
 
 ## Easy code — HumanEval+ (82 problems)
 
@@ -71,17 +92,19 @@ no escalation needed.
 These bound exactly what the headline means. They came out of an adversarial audit of our own
 claims; we kept the ones the data forced us to keep.
 
-1. **Small-n on accuracy.** The 12/12-vs-12/12 tie is on **n=12**; each arm's 95% CI spans
-   ~74–100%. The sample establishes the **cost** gap, **not** accuracy parity — it cannot
-   distinguish the two systems' accuracy. Telling 97.8% from 100% would take ~350 problems.
-2. **Full-run interval.** 44/45 = 97.8% carries a 95% Wilson CI of about **[88%, 100%]**. The
-   recovery sub-rate driving it (10/11 = 91%) has a CI of roughly [62%, 98%]. Read the point
-   estimate with its interval.
-3. **The ~46× is extrapolated; the ~36× is measured.** Fusion ran on 12 problems only (abc301–303).
-   $22.65 is projected from its measured per-problem cost. The 36× head-to-head is direct.
+1. **The accuracy result is a tie, not a win.** 39/40 vs 37/40 is +2 problems with overlapping 95%
+   CIs ([87.1%, 99.6%] vs [80.1%, 97.4%]). Read it as parity. It is now measured at n=40 (real
+   power), which is the only change from the earlier underpowered n=12 tie — but it still does not
+   license "beats Fusion."
+2. **Point estimates carry intervals.** Hybrid 44/45 = 97.8% has a 95% Wilson CI of ~[88%, 100%];
+   the recovery sub-rate driving it (10/11 = 91%) has a CI of ~[62%, 98%]. Read points with bands.
+3. **The cost gap is measured; 5 Fusion problems are credit-capped.** Fusion ran on 40 of 45 (the
+   rest hit a 402 credit cap and are excluded from both arms, not counted as losses). The ~35× cost
+   advantage is from the measured $16.96 (Fusion, 40 problems) vs $0.49 (hybrid, all 45). No
+   extrapolation — the earlier "~46× projected" is retired in favor of this measured ~35×.
 4. **The oracle is public sample tests only.** Both systems are judged by the **same** oracle —
    the problem's public sample cases (1–4 per problem, mean 2.8; two problems have a single case).
-   This is **not** AtCoder's hidden judge suite. "100%" and "97.8%" mean "passes the public
+   This is **not** AtCoder's hidden judge suite. "97.5%" and "92.5%" mean "passes the public
    samples," not "provably correct in competition." The leniency is **identical for both systems**,
    so the *comparison* is fair; only the absolute accuracy is inflated vs full hidden-test scoring.
 5. **"Local" describes the product, not this run.** These numbers were measured with the council
@@ -104,18 +127,20 @@ measured cost.
 
 ## What this means
 
-Three jobs, three winners:
+Three jobs, three configurations:
 
-- **Maximum accuracy, cost no object, cloud is fine** → a frontier fusion (OpenRouter Fusion).
 - **Cheapest verifiable answers, fully local and private** → the **council** (75.6% on hard code
-  for 3 cents, $0 local).
-- **Fusion-class results without the Fusion bill** → the **hybrid**: ties Fusion on the measured
-  head-to-head for ~1/36th the cost, keeps 75% of work local, and pays for a frontier call only on
-  the hard minority it can't verify itself.
+  for 3 cents, $0 local, nothing leaves your machine).
+- **Cloud-leader accuracy without the cloud-leader bill** → the **hybrid**: tied with OpenRouter
+  Fusion on a measured 40-problem head-to-head (39/40 vs 37/40, nominally ahead) for ~1/35th the
+  cost, keeping 75% of work local and paying for a frontier call only on the hard minority it
+  can't verify itself.
+- **A pure cloud fusion** (OpenRouter Fusion) remains a strong, simple option if cost and locality
+  don't matter — but on this benchmark it was neither more accurate nor remotely cheaper.
 
-The honest one-liner: **same accuracy as the cloud leader on the problems we could compare,
-at a fraction of the cost — with most of the work never leaving your machine.** The cost claim is
-measured; the accuracy claim is a tie on a small sample, stated as exactly that.
+The honest one-liner: **matches the cloud market leader's accuracy on a measured 40-problem
+head-to-head, at ~35× lower cost, with three-quarters of the work never leaving your machine.**
+Both halves are now measured; the accuracy half is a statistical tie, stated as exactly that.
 
 ## Reproduce it
 
