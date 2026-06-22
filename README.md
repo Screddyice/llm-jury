@@ -25,6 +25,8 @@ fusion on hard code — at ~38× lower cost.**
 | **Litmus hybrid** — local council + 1 opt-in frontier escalation | **44/45 (97.8%)** | **$0.49** | 75% |
 | OpenRouter Fusion — commercial frontier fusion | 41/45 (91.1%) | $18.31 | 0% |
 
+![Cost vs. accuracy on 45 hard LiveCodeBench problems — Litmus hybrid 44/45 at $0.49, up-and-left of OpenRouter Fusion 41/45 at $18.31 (~38× cheaper); Litmus council 75.6% at ~$0.03, local and free.](assets/cost_vs_accuracy.svg)
+
 **Same accuracy, ~38× cheaper.** Litmus *matches* the commercial frontier fusion — a strict
 superset, solving every problem it does plus 3 — for **$0.49 vs $18.31**, running 75% of problems
 fully on your laptop and escalating only the hard minority to a single cloud call. *(The +3-problem

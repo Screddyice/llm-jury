@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="1200" height="630" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="1199" height="629" fill="none" stroke="#E5E4DF" stroke-width="1"/>
+
+  <text x="60" y="56" font-size="30" font-weight="700" fill="#2C2C2A">Cost vs. accuracy — 45 hard LiveCodeBench problems</text>
+  <text x="60" y="86" font-size="17" fill="#5F5E5A">Same problems, same public-test oracle. Measured API spend. Litmus is up-and-to-the-left: more accurate, far cheaper.</text>
+
+  <line x1="130" y1="130" x2="130" y2="500" stroke="#9b9a94" stroke-width="1.5"/>
+  <line x1="130" y1="500" x2="1060" y2="500" stroke="#9b9a94" stroke-width="1.5"/>
+
+  <line x1="130" y1="130" x2="1060" y2="130" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="130" y1="253.3" x2="1060" y2="253.3" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="130" y1="376.7" x2="1060" y2="376.7" stroke="#EEEDE7" stroke-width="1"/>
+  <text x="120" y="135" font-size="14" fill="#888780" text-anchor="end">100%</text>
+  <text x="120" y="258" font-size="14" fill="#888780" text-anchor="end">90%</text>
+  <text x="120" y="381" font-size="14" fill="#888780" text-anchor="end">80%</text>
+  <text x="120" y="505" font-size="14" fill="#888780" text-anchor="end">70%</text>
+
+  <line x1="362.5" y1="130" x2="362.5" y2="500" stroke="#F4F3EE" stroke-width="1"/>
+  <line x1="595" y1="130" x2="595" y2="500" stroke="#F4F3EE" stroke-width="1"/>
+  <line x1="827.5" y1="130" x2="827.5" y2="500" stroke="#F4F3EE" stroke-width="1"/>
+  <text x="130" y="524" font-size="14" fill="#888780" text-anchor="middle">$0.01</text>
+  <text x="362.5" y="524" font-size="14" fill="#888780" text-anchor="middle">$0.10</text>
+  <text x="595" y="524" font-size="14" fill="#888780" text-anchor="middle">$1</text>
+  <text x="827.5" y="524" font-size="14" fill="#888780" text-anchor="middle">$10</text>
+  <text x="1060" y="524" font-size="14" fill="#888780" text-anchor="middle">$100</text>
+  <text x="595" y="556" font-size="15" font-weight="500" fill="#5F5E5A" text-anchor="middle">Cost to solve all 45 problems  (log scale)</text>
+
+  <line x1="523" y1="320" x2="889" y2="320" stroke="#BA7517" stroke-width="2" stroke-dasharray="6 5"/>
+  <path d="M523 320 l12 -6 l0 12 z" fill="#BA7517"/>
+  <path d="M889 320 l-12 -6 l0 12 z" fill="#BA7517"/>
+  <rect x="641" y="296" width="130" height="26" rx="6" fill="#FAEEDA"/>
+  <text x="706" y="314" font-size="16" font-weight="700" fill="#854F0B" text-anchor="middle">~38× cheaper</text>
+
+  <circle cx="244" cy="431" r="9" fill="#639922" stroke="#ffffff" stroke-width="2"/>
+  <text x="266" y="427" font-size="16" font-weight="700" fill="#3B6D11">Litmus council — local, free</text>
+  <text x="266" y="448" font-size="15" fill="#5F5E5A">75.6%  ·  ~$0.03  ·  no cloud</text>
+
+  <circle cx="889" cy="240" r="11" fill="#6b6a66" stroke="#ffffff" stroke-width="2"/>
+  <text x="869" y="231" font-size="16" font-weight="700" fill="#444441" text-anchor="end">OpenRouter Fusion</text>
+  <text x="869" y="252" font-size="15" fill="#5F5E5A" text-anchor="end">91.1%  ·  $18.31  ·  cloud, 8 models</text>
+
+  <circle cx="523" cy="157" r="15" fill="#1D9E75" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="523" cy="157" r="22" fill="none" stroke="#1D9E75" stroke-width="1.5" opacity="0.45"/>
+  <text x="548" y="152" font-size="19" font-weight="700" fill="#0F6E56">Litmus hybrid</text>
+  <text x="548" y="174" font-size="16" fill="#0F6E56">97.8%  ·  $0.49  ·  75% on-device</text>
+
+  <text x="60" y="600" font-size="15" fill="#888780">Don't vote, verify.  ·  pip install litmus-verify  ·  github.com/ajsai47/litmus</text>
+  <text x="1140" y="600" font-size="13" fill="#B4B2A9" text-anchor="end">accuracy tie (McNemar p=0.25); cost gap measured</text>
+</svg>
