@@ -52,28 +52,28 @@ the problem, the bigger the win. ([Read the full write-up →](https://app.notio
 
 ## Benchmarks
 
-Measured head-to-head on the same hard LiveCodeBench problems, judged by the same oracle — the
-40 problems where OpenRouter Fusion actually ran ([full numbers + methodology + caveats](BENCHMARKS.md)):
+Measured head-to-head on the full 45 hard LiveCodeBench problems, judged by the same oracle
+([full numbers + methodology + caveats](BENCHMARKS.md)):
 
-| | Accuracy (n=40) | 95% CI | Cost | Local | Verified |
+| | Accuracy (n=45) | 95% CI | Cost | Local | Verified |
 |---|---|---|---|---|---|
-| **Litmus hybrid** (council + 1 frontier escalation) | **39/40 (97.5%)** | [87%, 99.6%] | **$0.49** | ◐ | ✓ |
-| OpenRouter Fusion (cloud) | 37/40 (92.5%) | [80%, 97.4%] | $16.96 | ✗ | ✗ |
-| **Litmus council** (small open council, local) | 34/45 (75.6%) | — | **$0.031** · free local | ✓ | ✓ |
+| **Litmus hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88%, 99.6%] | **$0.49** | ◐ | ✓ |
+| OpenRouter Fusion (cloud) | 41/45 (91.1%) | [79%, 97%] | $18.31 | ✗ | ✗ |
+| **Litmus council** (small open council, local) | 34/45 (75.6%) | [61%, 86%] | **$0.031** · free local | ✓ | ✓ |
 
-**The hybrid matches OpenRouter Fusion's accuracy — measured, not extrapolated — at ~35× less
-money** (39/40 vs 37/40, $0.49 vs $16.96). It solves 75% of problems with a local council and
-escalates only the hard minority to a single frontier model. The plain **council**, with no cloud
-at all, gets 75.6% on hard code for 3 cents — and on easier code (HumanEval+) **matches frontier
-outright** (97.6%).
+**The hybrid matches OpenRouter Fusion's accuracy — measured on all 45 — at ~38× less money**
+(44/45 vs 41/45, $0.49 vs $18.31). In fact the hybrid solves a *strict superset*: every problem
+Fusion gets, plus three more, losing none. It runs 75% of problems on a local council and escalates
+only the hard minority to a single frontier model. The plain **council**, with no cloud at all,
+gets 75.6% on hard code for 3 cents — and on easier code (HumanEval+) **matches frontier outright**
+(97.6%).
 
-Stated honestly: the **cost** gap is measured and large; the **accuracy** result is a *statistical
-tie* — the hybrid is nominally ahead by 2 problems, but the confidence intervals overlap, so read
-it as parity, not a win. We don't claim Litmus is *more* accurate than a frontier fusion. (Fusion
-ran on 40 of 45 — 5 problems hit a credit cap and are excluded from both arms, not counted as
-losses; the hybrid solved all 5.) "Correct" here means "passes the public sample tests," and the
-escalated ~25% do leave the device. Full caveats — confidence intervals, the public-test oracle,
-the credit cap — are in [BENCHMARKS.md](BENCHMARKS.md).
+Stated honestly: the **cost** gap is measured and decisive; the **accuracy** edge (+3 problems, 0
+losses) is a clean sweep on the sample but **not statistically significant** (McNemar p = 0.25 at
+n=45) — so read it as parity-or-better, not a proven win. And we *gave Fusion a token-budget
+advantage* on 5 problems it first truncated, which only helped it. "Correct" here means "passes the
+public sample tests," and the escalated ~25% do leave the device. Full caveats — confidence
+intervals, the public-test oracle, the fairness disclosure — are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Quickstart
 
