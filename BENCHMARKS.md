@@ -30,7 +30,7 @@ Every problem, byte-identical oracle, real measured cost:
 |---|---|---|---|---|---|---|
 | **Litmus hybrid** (council + 1 frontier escalation) | **44/45 (97.8%)** | [88.4%, 99.6%] | **$0.49** | ◐ | ◐ | ✓ |
 | OpenRouter Fusion (closed, ~8-model panel + judge) | 41/45 (91.1%) | [79.3%, 96.5%] | $18.31 | ✗ | ✗ | ✗ |
-| **Litmus council** (small open council, local, no cloud) | 34/45 (75.6%) | [60.8%, 85.9%] | $0.031 · $0 local | ✓ | ✓ | ✓ |
+| **Litmus council** (small open council, local, no cloud) | 34/45 (75.6%) | [61.3%, 85.8%] | $0.031 · $0 local | ✓ | ✓ | ✓ |
 
 - **The hybrid's correct set is a strict superset of Fusion's.** It wins 3 problems Fusion gets
   wrong (`abc311_c` medium, `abc312_e` hard, `abc314_f` hard), loses **zero**, and both miss
