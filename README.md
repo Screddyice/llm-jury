@@ -45,10 +45,17 @@ on a laptop, plus a verifier, match or beat a frontier model on verifiable work:
 On *hard* code, the small-model council **beats** the frontier model by 13 points. The harder
 the problem, the bigger the win. ([Read the full write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb))
 
+And if you want frontier-fusion accuracy without the frontier-fusion bill, the opt-in **hybrid**
+adds one cloud escalation on just the problems the council can't verify: on a measured 45-problem
+run it **matched or beat the cloud market leader (OpenRouter Fusion) on every problem — 44/45 vs
+41/45 — at ~38× lower cost** ($0.49 vs $18.31). See [Benchmarks](#benchmarks).
+
 > Caveat, stated honestly: the frontier number is a single shot; Litmus spends best-of-N + a
 > verifier (your laptop's compute). The claim is "a laptop matches/beats the frontier model's
 > *out-of-the-box* answer," not "wins sample-for-sample." For someone choosing between their
-> laptop and an API bill, that's the comparison that matters.
+> laptop and an API bill, that's the comparison that matters. (The hybrid's +3-problem accuracy
+> edge over Fusion is a clean sweep but not statistically significant at n=45 — read it as parity
+> at a fraction of the cost; full caveats in [BENCHMARKS.md](BENCHMARKS.md).)
 
 ## Benchmarks
 

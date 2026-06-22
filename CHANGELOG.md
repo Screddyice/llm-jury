@@ -25,7 +25,12 @@ First public release.
 - `litmus solve --json` (machine-readable result), `--models` / `--best` (custom council from the CLI).
 - Hardened execution: process-group kill on timeout (reaps forked grandchildren), 1 MiB output cap,
   and refuses to run as root unless `LITMUS_ALLOW_ROOT=1`.
-- Head-to-head [BENCHMARKS.md](BENCHMARKS.md) vs frontier one-shot and OpenRouter Fusion.
-- Offline test suite (14 tests); zero runtime dependencies.
+- Opt-in **hybrid frontier escalation**: `litmus solve --frontier MODEL` (and `Engine(frontier=...)`)
+  escalates *only* the problems the local council can't verify to one frontier cloud model — a
+  frontier call on the hard minority, not on every problem.
+- Head-to-head [BENCHMARKS.md](BENCHMARKS.md) vs frontier one-shot and OpenRouter Fusion, including
+  a measured 45-problem LiveCodeBench run: the hybrid matched-or-beat OpenRouter Fusion on every
+  problem (44/45 vs 41/45, a strict superset) at ~38× lower cost.
+- Offline test suite (15 tests); zero runtime dependencies.
 
 [0.1.0]: https://github.com/ajsai47/litmus/releases/tag/v0.1.0
