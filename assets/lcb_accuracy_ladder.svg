@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="1100" height="620" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="1099" height="619" fill="none" stroke="#E5E4DF" stroke-width="1"/>
+
+  <text x="60" y="52" font-size="28" font-weight="700" fill="#2C2C2A">Climbing from 11% to 98% on hard code</text>
+  <text x="60" y="80" font-size="16" fill="#5F5E5A">LiveCodeBench, 45 medium/hard problems. Verify the best of many; escalate only what won't verify.</text>
+
+  <line x1="150" y1="130" x2="150" y2="520" stroke="#9b9a94" stroke-width="1.5"/>
+  <line x1="150" y1="520" x2="1050" y2="520" stroke="#9b9a94" stroke-width="1.5"/>
+  <line x1="150" y1="130" x2="1050" y2="130" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="150" y1="227.5" x2="1050" y2="227.5" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="150" y1="325" x2="1050" y2="325" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="150" y1="422.5" x2="1050" y2="422.5" stroke="#EEEDE7" stroke-width="1"/>
+  <text x="138" y="525" font-size="14" fill="#888780" text-anchor="end">0%</text>
+  <text x="138" y="427.5" font-size="14" fill="#888780" text-anchor="end">25%</text>
+  <text x="138" y="330" font-size="14" fill="#888780" text-anchor="end">50%</text>
+  <text x="138" y="232.5" font-size="14" fill="#888780" text-anchor="end">75%</text>
+  <text x="138" y="135" font-size="14" fill="#888780" text-anchor="end">100%</text>
+
+  <rect x="202.5" y="476.7" width="120" height="43.3" rx="3" fill="#C7C5BC"/>
+  <rect x="427.5" y="277.4" width="120" height="242.6" rx="3" fill="#97C459"/>
+  <rect x="652.5" y="225.2" width="120" height="294.8" rx="3" fill="#639922"/>
+  <rect x="877.5" y="138.6" width="120" height="381.4" rx="3" fill="#1D9E75"/>
+
+  <text x="262.5" y="467" font-size="17" font-weight="700" fill="#5F5E5A" text-anchor="middle">11.1%</text>
+  <text x="487.5" y="268" font-size="17" font-weight="700" fill="#3B6D11" text-anchor="middle">62.2%</text>
+  <text x="712.5" y="216" font-size="17" font-weight="700" fill="#27500A" text-anchor="middle">75.6%</text>
+  <text x="937.5" y="129" font-size="19" font-weight="700" fill="#0F6E56" text-anchor="middle">97.8%</text>
+
+  <text x="262.5" y="543" font-size="14" fill="#5F5E5A" text-anchor="middle">Phi-4</text>
+  <text x="262.5" y="561" font-size="14" fill="#888780" text-anchor="middle">one shot</text>
+  <text x="487.5" y="543" font-size="14" fill="#5F5E5A" text-anchor="middle">+ best-of-9</text>
+  <text x="487.5" y="561" font-size="14" fill="#888780" text-anchor="middle">+ verifier</text>
+  <text x="712.5" y="543" font-size="14" fill="#5F5E5A" text-anchor="middle">+ diverse</text>
+  <text x="712.5" y="561" font-size="14" fill="#888780" text-anchor="middle">council</text>
+  <text x="937.5" y="543" font-size="14" font-weight="700" fill="#0F6E56" text-anchor="middle">+ frontier</text>
+  <text x="937.5" y="561" font-size="14" fill="#0F6E56" text-anchor="middle">escalation (hybrid)</text>
+
+  <line x1="150" y1="164.7" x2="1050" y2="164.7" stroke="#6b6a66" stroke-width="2" stroke-dasharray="7 5"/>
+  <rect x="612" y="151" width="300" height="26" rx="6" fill="#F1EFE8"/>
+  <text x="762" y="169" font-size="14" font-weight="700" fill="#444441" text-anchor="middle">OpenRouter Fusion (cloud) — 91.1%</text>
+
+  <text x="60" y="600" font-size="14" fill="#888780">Don't vote, verify.  ·  pip install llmjury  ·  github.com/ajsai47/llm-jury</text>
+</svg>

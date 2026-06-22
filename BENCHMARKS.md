@@ -32,6 +32,10 @@ Every problem, byte-identical oracle, real measured cost:
 | OpenRouter Fusion (closed, ~8-model panel + judge) | 41/45 (91.1%) | [79.3%, 96.5%] | $18.31 | ✗ | ✗ | ✗ |
 | **LLM-Jury council** (small open council, local, no cloud) | 34/45 (75.6%) | [61.3%, 85.8%] | $0.031 · $0 local | ✓ | ✓ | ✓ |
 
+![Accuracy ladder on LiveCodeBench: Phi-4 one-shot 11.1% → +best-of-9+verifier 62.2% → +diverse council 75.6% → +frontier escalation (hybrid) 97.8%, above OpenRouter Fusion's 91.1%.](assets/lcb_accuracy_ladder.svg)
+
+![Cost to solve all 45 problems: OpenRouter Fusion $18.31 vs LLM-Jury hybrid $0.49 (~37× cheaper) vs LLM-Jury council $0.031 (~590× cheaper, $0 local).](assets/cost_chasm.svg)
+
 - **The hybrid's correct set is a strict superset of Fusion's.** It wins 3 problems Fusion gets
   wrong (`abc311_c` medium, `abc312_e` hard, `abc314_f` hard), loses **zero**, and both miss
   exactly one genuinely brutal problem (`abc314_e` hard). Every problem Fusion solves, the hybrid

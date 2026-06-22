@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="1100" height="600" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="1099" height="599" fill="none" stroke="#E5E4DF" stroke-width="1"/>
+
+  <text x="60" y="52" font-size="28" font-weight="700" fill="#2C2C2A">Fusion's value flips with model strength</text>
+  <text x="60" y="80" font-size="16" fill="#5F5E5A">Same fixed sample budget — one strong model vs. a diverse panel. Only the models' strength changes.</text>
+
+  <rect x="700" y="98" width="14" height="14" rx="2" fill="#888780"/>
+  <text x="720" y="110" font-size="14" fill="#5F5E5A">one model (best-of-N)</text>
+  <rect x="900" y="98" width="14" height="14" rx="2" fill="#1D9E75"/>
+  <text x="920" y="110" font-size="14" fill="#5F5E5A">diverse panel / council</text>
+
+  <line x1="150" y1="150" x2="150" y2="490" stroke="#9b9a94" stroke-width="1.5"/>
+  <line x1="150" y1="490" x2="1050" y2="490" stroke="#9b9a94" stroke-width="1.5"/>
+  <line x1="150" y1="150" x2="1050" y2="150" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="150" y1="235" x2="1050" y2="235" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="150" y1="320" x2="1050" y2="320" stroke="#EEEDE7" stroke-width="1"/>
+  <line x1="150" y1="405" x2="1050" y2="405" stroke="#EEEDE7" stroke-width="1"/>
+  <text x="138" y="495" font-size="14" fill="#888780" text-anchor="end">0%</text>
+  <text x="138" y="410" font-size="14" fill="#888780" text-anchor="end">25%</text>
+  <text x="138" y="325" font-size="14" fill="#888780" text-anchor="end">50%</text>
+  <text x="138" y="240" font-size="14" fill="#888780" text-anchor="end">75%</text>
+  <text x="138" y="155" font-size="14" fill="#888780" text-anchor="end">100%</text>
+
+  <rect x="280" y="225.5" width="100" height="264.5" rx="3" fill="#888780"/>
+  <rect x="400" y="263.2" width="100" height="226.8" rx="3" fill="#1D9E75"/>
+  <text x="330" y="216" font-size="16" font-weight="700" fill="#444441" text-anchor="middle">78%</text>
+  <text x="330" y="468" font-size="13" fill="#ffffff" text-anchor="middle">7/9</text>
+  <text x="450" y="254" font-size="16" font-weight="700" fill="#0F6E56" text-anchor="middle">67%</text>
+  <text x="450" y="468" font-size="13" fill="#ffffff" text-anchor="middle">6/9</text>
+
+  <rect x="640" y="278.5" width="100" height="211.5" rx="3" fill="#888780"/>
+  <rect x="760" y="233" width="100" height="257" rx="3" fill="#1D9E75"/>
+  <text x="690" y="269" font-size="16" font-weight="700" fill="#444441" text-anchor="middle">62%</text>
+  <text x="690" y="468" font-size="13" fill="#ffffff" text-anchor="middle">28/45</text>
+  <text x="810" y="224" font-size="16" font-weight="700" fill="#0F6E56" text-anchor="middle">76%</text>
+  <text x="810" y="468" font-size="13" fill="#ffffff" text-anchor="middle">34/45</text>
+
+  <text x="390" y="520" font-size="16" font-weight="700" fill="#2C2C2A" text-anchor="middle">Frontier models</text>
+  <text x="390" y="540" font-size="13" fill="#888780" text-anchor="middle">9 contested hard problems · directional</text>
+  <text x="750" y="520" font-size="16" font-weight="700" fill="#2C2C2A" text-anchor="middle">Small open models</text>
+  <text x="750" y="540" font-size="13" fill="#888780" text-anchor="middle">45 hard problems</text>
+
+  <rect x="300" y="120" width="180" height="26" rx="6" fill="#FAECE7"/>
+  <text x="390" y="138" font-size="14" font-weight="700" fill="#993C1D" text-anchor="middle">✗ fusion is a tax</text>
+  <rect x="662" y="120" width="176" height="26" rx="6" fill="#E1F5EE"/>
+  <text x="750" y="138" font-size="14" font-weight="700" fill="#0F6E56" text-anchor="middle">✓ fusion is a lever</text>
+
+  <text x="60" y="578" font-size="14" fill="#888780">The verifier, not the model count, decides.  ·  github.com/ajsai47/llm-jury</text>
+</svg>
