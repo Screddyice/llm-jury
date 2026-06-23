@@ -45,6 +45,6 @@
   <text x="548" y="152" font-size="19" font-weight="700" fill="#0F6E56">LLM-Jury hybrid</text>
   <text x="548" y="174" font-size="16" fill="#0F6E56">97.8%  ·  $0.49  ·  75% on-device</text>
 
-  <text x="60" y="600" font-size="15" fill="#888780">Don't vote, verify.  ·  pip install llmjury  ·  github.com/ajsai47/llm-jury</text>
+  <text x="60" y="600" font-size="15" fill="#888780">Don't vote, verify.  ·  pip install llm-jury-verify  ·  github.com/ajsai47/llm-jury</text>
   <text x="1140" y="600" font-size="13" fill="#B4B2A9" text-anchor="end">accuracy tie (McNemar p=0.25); cost gap measured</text>
 </svg>

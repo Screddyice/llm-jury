@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llmjury"
+name = "llm-jury-verify"
 version = "0.1.0"
 description = "Local verified answers — don't vote, verify. A small-model council + a real verifier, on your own machine."
 readme = "README.md"

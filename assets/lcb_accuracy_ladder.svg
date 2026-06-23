@@ -40,5 +40,5 @@
   <rect x="612" y="151" width="300" height="26" rx="6" fill="#F1EFE8"/>
   <text x="762" y="169" font-size="14" font-weight="700" fill="#444441" text-anchor="middle">OpenRouter Fusion (cloud) — 91.1%</text>
 
-  <text x="60" y="600" font-size="14" fill="#888780">Don't vote, verify.  ·  pip install llmjury  ·  github.com/ajsai47/llm-jury</text>
+  <text x="60" y="600" font-size="14" fill="#888780">Don't vote, verify.  ·  pip install llm-jury-verify  ·  github.com/ajsai47/llm-jury</text>
 </svg>

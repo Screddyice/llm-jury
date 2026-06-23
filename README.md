@@ -1,7 +1,7 @@
 # LLM-Jury
 
-[![PyPI](https://img.shields.io/pypi/v/llmjury)](https://pypi.org/project/llmjury/)
-[![Python](https://img.shields.io/pypi/pyversions/llmjury)](https://pypi.org/project/llmjury/)
+[![PyPI](https://img.shields.io/pypi/v/llm-jury-verify)](https://pypi.org/project/llm-jury-verify/)
+[![Python](https://img.shields.io/pypi/pyversions/llm-jury-verify)](https://pypi.org/project/llm-jury-verify/)
 [![CI](https://img.shields.io/github/actions/workflow/status/ajsai47/llm-jury/ci.yml?label=ci)](https://github.com/ajsai47/llm-jury/actions)
 [![dependencies](https://img.shields.io/badge/dependencies-0-success)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -38,7 +38,7 @@ code — **75.6% vs 62.2%** on LiveCodeBench — and matches it on HumanEval+ (*
 Free, private, zero dependencies (stdlib only).
 
 ```bash
-pip install llmjury   # zero dependencies, stdlib only
+pip install llm-jury-verify   # zero dependencies, stdlib only
 llmjury demo                 # 5-second offline demo — no API key, nothing to download
 ```
 

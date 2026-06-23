@@ -42,6 +42,6 @@
   <text x="457" y="341" font-size="18" font-weight="700" fill="#3B6D11">$0.031</text>
   <text x="457" y="362" font-size="14" fill="#854F0B">~590× cheaper  ·  $0 on your laptop</text>
 
-  <text x="60" y="458" font-size="13" fill="#888780">Don't vote, verify.  ·  pip install llmjury  ·  github.com/ajsai47/llm-jury</text>
+  <text x="60" y="458" font-size="13" fill="#888780">Don't vote, verify.  ·  pip install llm-jury-verify  ·  github.com/ajsai47/llm-jury</text>
   <text x="1040" y="458" font-size="12" fill="#B4B2A9" text-anchor="end">same oracle (public tests); hybrid–Fusion accuracy edge not significant (p=0.25)</text>
 </svg>
