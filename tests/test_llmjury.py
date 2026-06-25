@@ -5,6 +5,10 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+
+from llmjury import verifiers  # noqa: E402
 from llmjury.verifiers import (  # noqa: E402
     extract_code, _same_output, FunctionalCodeVerifier, StdioCodeVerifier,
 )
@@ -62,6 +66,36 @@ def test_sandbox_blocks_secret_read():
         assert StdioCodeVerifier(cases).verify(prog)  # passes only because secret is absent
     finally:
         del os.environ["LLMJURY_TEST_SECRET"]
+
+
+def _docker_reachable():
+    if not shutil.which("docker"):
+        return False
+    try:
+        return subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=20).returncode == 0
+    except Exception:
+        return False
+
+
+def test_container_cuts_network_when_docker_available():
+    # With a daemon reachable, code runs in a --network none container: a benign solution
+    # still verifies, but one that tries to phone out during verification must fail.
+    # Skipped (returns) where Docker is unavailable, e.g. CI without a daemon — so this
+    # never turns CI red, it only adds coverage where a sandbox can actually be built.
+    if not _docker_reachable():
+        return
+    os.environ["LLMJURY_SANDBOX"] = "docker"
+    verifiers._provisioned = None                 # force a fresh resolve under the env
+    try:
+        good = "```python\ndef add(a, b):\n    return a + b\n```"
+        net_test = ("import socket\nsocket.setdefaulttimeout(5)\n"
+                    "socket.create_connection(('1.1.1.1', 53))\nassert candidate(2, 3) == 5\n")
+        assert FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]).verify(good)
+        assert not FunctionalCodeVerifier(net_test, "add").verify(good)
+    finally:
+        os.environ.pop("LLMJURY_SANDBOX", None)
+        verifiers._provisioned = None
 
 
 class _FakeBackend:

@@ -62,7 +62,8 @@ def cmd_solve(a):
     if a.frontier:
         from .backends import OpenRouterBackend
         fb = OpenRouterBackend(cache_path=CACHE)   # the frontier tier is a cloud model
-    sys.stderr.write(WARNING)
+    from .verifiers import sandbox_note
+    sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
     r = Engine(_backend(a.backend), panel=panel, best=best, k=a.k,
                frontier=a.frontier, frontier_backend=fb).solve(task, verifier)
 
