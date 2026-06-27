@@ -165,3 +165,58 @@ class OllamaBackend(Backend):
             except Exception:
                 time.sleep(2 * (attempt + 1))
         return ""
+
+
+class OpenAICompatBackend(Backend):
+    """A generic OpenAI-compatible /chat/completions endpoint.
+
+    Covers any server that speaks the OpenAI chat shape: an `mlx_lm.server`, vLLM,
+    LM Studio, llama.cpp's server, etc. The motivating case is bringing Shawn's
+    fine-tuned MLX brain (Qwen3.5-4B + LoRA, served by mlx_lm.server on
+    127.0.0.1:8801) into the council as an opt-in panelist — without a GGUF
+    conversion (the qwen3.5 GGUF path is broken). Pair with the engine's per-model
+    `route` so only this one panelist hits the custom endpoint.
+    """
+    name = "openai-compat"
+
+    def __init__(self, base_url, api_key=None, **kw):
+        super().__init__(**kw)
+        self.url = base_url.rstrip("/") + "/chat/completions"
+        self.key = api_key or os.environ.get("OPENAI_COMPAT_API_KEY")
+
+    def _one(self, model, prompt, temperature, max_tokens):
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }).encode()
+        h = {"Content-Type": "application/json"}
+        if self.key:
+            h["Authorization"] = f"Bearer {self.key}"
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(self.url, data=body, headers=h, method="POST")
+                with urllib.request.urlopen(req, timeout=600) as r:
+                    d = json.load(r)
+                if isinstance(d, dict) and d.get("error"):
+                    sys.stderr.write(f"[llmjury] openai-compat {model}: {d['error']}\n")
+                    return ""
+                choices = d.get("choices") or []
+                if not choices:
+                    sys.stderr.write(f"[llmjury] openai-compat {model}: empty response\n")
+                    return ""
+                m = choices[0].get("message", {}) or {}
+                return m.get("content") or ""
+            except urllib.error.HTTPError as e:
+                sys.stderr.write(
+                    f"[llmjury] openai-compat {model} HTTP {e.code} at {self.url} "
+                    "(is the server up and the model loaded?)\n")
+                return ""
+            except urllib.error.URLError as e:
+                sys.stderr.write(
+                    f"[llmjury] cannot reach {self.url} ({e.reason}) — is the endpoint serving?\n")
+                return ""
+            except Exception:
+                time.sleep(2 * (attempt + 1))
+        return ""

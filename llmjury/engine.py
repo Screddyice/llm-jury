@@ -31,7 +31,8 @@ class Result:
 
 class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
-                 k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None):
+                 k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
+                 route=None):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -42,10 +43,16 @@ class Engine:
         self.temperature = temperature
         self.frontier = frontier                          # opt-in strong model for the last tier
         self.frontier_backend = frontier_backend or backend
+        # Per-model backend overrides: a panelist named here generates through its own
+        # backend instead of the shared one. Lets a custom local model — e.g. a
+        # fine-tuned MLX brain on an OpenAI-compatible endpoint — sit in the council
+        # alongside the default panel. Empty by default, so the common path is unchanged.
+        self.route = route or {}
 
     def _gen(self, model, prompt, n):
-        texts = self.backend.complete(model, prompt, n=n,
-                                      temperature=self.temperature, max_tokens=self.max_tokens)
+        backend = self.route.get(model, self.backend)
+        texts = backend.complete(model, prompt, n=n,
+                                 temperature=self.temperature, max_tokens=self.max_tokens)
         return [(model, t) for t in texts]
 
     def solve(self, task, verifier, escalate=True):

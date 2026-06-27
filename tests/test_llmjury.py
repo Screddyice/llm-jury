@@ -206,6 +206,29 @@ def test_timeout_is_bounded():
     assert not ok and (time.time() - t) < 10  # reaped near the timeout, not after 30s
 
 
+def test_engine_routes_brain_panelist_to_its_own_backend():
+    # A2: an extra panelist ("jarvis-brain") generates through its OWN backend via
+    # `route`, not the shared council backend. Council members are all wrong; only
+    # the routed brain solves -> proves routing works and the brain joins the council.
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
+    council = _FakeBackend({"best": [_BAD], "other": [_BAD]})       # no "jarvis-brain" key
+    brain = _FakeBackend({"jarvis-brain": [_GOOD]})
+    eng = Engine(council, panel=["best", "other", "jarvis-brain"], best="best", k=2,
+                 route={"jarvis-brain": brain})
+    r = eng.solve("add", FunctionalCodeVerifier(_TESTS, "add"))
+    assert r.verified and r.stage == "council" and r.model == "jarvis-brain"
+
+
+def test_engine_route_empty_uses_shared_backend():
+    # Regression: with no route, every panelist uses the shared backend (unchanged path).
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
+    eng = Engine(_FakeBackend({"best": [_GOOD]}), panel=["best"], best="best", k=1)
+    r = eng.solve("add", FunctionalCodeVerifier(_TESTS, "add"))
+    assert r.verified and r.model == "best"
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items()
                    if k.startswith("test_") and callable(v))
