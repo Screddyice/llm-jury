@@ -158,6 +158,27 @@ def test_functional_verifier_from_cases():
     assert FunctionalCodeVerifier.from_cases("square", [(5, 25), (3, 9)]).verify(sq)
 
 
+def test_cli_func_cases_conversion():
+    # --cases + --entry-point: JSON cases become (args_tuple, expected) pairs for a call.
+    from llmjury.cli import _func_cases
+    assert _func_cases([{"args": [2, 3], "expected": 5}]) == [((2, 3), 5)]
+    # input/output are accepted as aliases for args/expected
+    assert _func_cases([{"input": [2, 3], "output": 5}]) == [((2, 3), 5)]
+    # a scalar (non-list) arg is wrapped into a 1-tuple (1-arg functions)
+    assert _func_cases([{"args": 5, "expected": 25}]) == [((5,), 25)]
+    # JSON types are preserved verbatim (strings stay strings)
+    assert _func_cases([{"args": ["a", "b"], "expected": "ab"}]) == [(("a", "b"), "ab")]
+
+
+def test_cli_func_cases_roundtrip_verifies():
+    # The CLI conversion feeds from_cases, which must verify a correct add and reject a wrong one.
+    from llmjury.cli import _func_cases
+    cases = _func_cases([{"args": [2, 3], "expected": 5}, {"args": [-1, 1], "expected": 0}])
+    v = FunctionalCodeVerifier.from_cases("add", cases)
+    assert v.verify(_GOOD)
+    assert not v.verify(_BAD)
+
+
 def test_demo_backend_escalates_and_verifies():
     from llmjury.engine import Engine
     from llmjury.backends import DemoBackend
