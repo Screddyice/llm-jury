@@ -38,6 +38,44 @@ def _refuse_root():
                  "Set LLMJURY_ALLOW_ROOT=1 to override (not recommended).")
 
 
+def _func_cases(raw):
+    """Convert --cases JSON into (args_tuple, expected) pairs for a function call.
+
+    Used when --cases is paired with --entry-point: each case calls the entry point
+    with `args` and compares its RETURN VALUE to `expected` (vs the stdin/stdout
+    contract --cases uses on its own). Each case is an object with args/expected
+    (preferred) or input/output aliases:
+
+        {"args": [2, 3], "expected": 5}   -> entry_point(2, 3) == 5
+        {"input": 5, "output": 25}        -> entry_point(5)    == 25  (scalar = one arg)
+
+    A list under args/input is spread as positional args; a scalar becomes a single
+    arg. JSON types are preserved, so numbers stay numbers and strings stay strings.
+    """
+    if not isinstance(raw, list):
+        sys.exit("error: --cases must be a JSON array of case objects")
+    out = []
+    for i, c in enumerate(raw):
+        if not isinstance(c, dict):
+            sys.exit(f"error: --cases[{i}] must be an object, got {type(c).__name__}")
+        if "args" in c:
+            args = c["args"]
+        elif "input" in c:
+            args = c["input"]
+        else:
+            sys.exit(f"error: --cases[{i}] needs an 'args' (or 'input') field "
+                     "when --entry-point is set")
+        if "expected" in c:
+            expected = c["expected"]
+        elif "output" in c:
+            expected = c["output"]
+        else:
+            sys.exit(f"error: --cases[{i}] needs an 'expected' (or 'output') field "
+                     "when --entry-point is set")
+        out.append((tuple(args) if isinstance(args, list) else (args,), expected))
+    return out
+
+
 def cmd_solve(a):
     _refuse_root()
     task = _read(a.task)
@@ -46,7 +84,12 @@ def cmd_solve(a):
             cases = json.loads(_read(a.cases))
         except json.JSONDecodeError as e:
             sys.exit(f"error: --cases is not valid JSON: {e}")
-        verifier = StdioCodeVerifier(cases)
+        if a.entry_point:
+            # function-call cases: call entry_point(*args) and compare its return value
+            verifier = FunctionalCodeVerifier.from_cases(a.entry_point, _func_cases(cases))
+        else:
+            # bare --cases: stdin/stdout contract (a full program reading stdin)
+            verifier = StdioCodeVerifier(cases)
     elif a.tests:
         ep = a.entry_point or "solve"
         if not a.entry_point:
@@ -113,7 +156,9 @@ def main():
     s.add_argument("--task", required=True, help="file containing the problem statement")
     s.add_argument("--tests", help="functional test file: a full check(candidate) OR just its body")
     s.add_argument("--entry-point", help="function name the tests call (default: solve)")
-    s.add_argument("--cases", help='JSON file: [{"input": "...", "output": "..."}] stdin/stdout cases')
+    s.add_argument("--cases", help='JSON file of cases. Alone: [{"input": "...", "output": "..."}] '
+                   'stdin/stdout cases. With --entry-point: [{"args": [2, 3], "expected": 5}] '
+                   'function-call cases (entry_point(*args) == expected)')
     s.add_argument("--backend", default="openrouter", choices=["openrouter", "ollama"])
     s.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
     s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
