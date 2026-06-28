@@ -99,7 +99,23 @@ def cmd_solve(a):
     else:
         sys.exit("error: provide --tests (functional check) or --cases (stdin/stdout JSON)")
 
+    backend = _backend(a.backend)
     panel = a.models.split(",") if a.models else None
+    route = {}
+    if a.brain:
+        # Opt-in: add Shawn's fine-tuned MLX brain as an EXTRA council panelist via
+        # its OpenAI-compatible endpoint, routed to its own backend. Appended after
+        # the default/specified panel so it's a council member, not the stage-1 best.
+        from .backends import OpenAICompatBackend
+        from .panels import default_panel
+        if panel is None:
+            _, panel = default_panel(backend.name)
+            panel = list(panel)
+        panel.append(a.brain_model)
+        route[a.brain_model] = OpenAICompatBackend(a.brain_url, cache_path=CACHE)
+        sys.stderr.write(
+            f"[llmjury] brain panelist: {a.brain_model} via {a.brain_url} "
+            "(extra council member, not the stage-1 best)\n")
     best = a.best or (panel[0] if panel else None)
     fb = None
     if a.frontier:
@@ -107,8 +123,8 @@ def cmd_solve(a):
         fb = OpenRouterBackend(cache_path=CACHE)   # the frontier tier is a cloud model
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
-    r = Engine(_backend(a.backend), panel=panel, best=best, k=a.k,
-               frontier=a.frontier, frontier_backend=fb).solve(task, verifier)
+    r = Engine(backend, panel=panel, best=best, k=a.k,
+               frontier=a.frontier, frontier_backend=fb, route=route).solve(task, verifier)
 
     if a.json:
         import dataclasses
@@ -166,6 +182,14 @@ def main():
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
     s.add_argument("--frontier", help="opt-in: a strong cloud model (e.g. deepseek/deepseek-v4-pro) "
                    "to escalate to when the local council can't verify (needs OPENROUTER_API_KEY)")
+    s.add_argument("--brain", action="store_true",
+                   help="add Shawn's fine-tuned MLX brain as an extra council panelist via an "
+                   "OpenAI-compatible endpoint (default the local mlx_lm.server). It joins the "
+                   "council stage, not the stage-1 best.")
+    s.add_argument("--brain-url", default="http://127.0.0.1:8801/v1",
+                   help="OpenAI-compatible base URL for --brain (default: local MLX server)")
+    s.add_argument("--brain-model", default="mlx-community/Qwen3.5-4B-MLX-4bit",
+                   help="model id the --brain endpoint serves")
     s.set_defaults(func=cmd_solve)
 
     sub.add_parser("demo", help="run the full pipeline offline — no API key, no Ollama") \
