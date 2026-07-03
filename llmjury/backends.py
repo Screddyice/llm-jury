@@ -28,21 +28,34 @@ class Backend:
     def _one(self, model, prompt, temperature, max_tokens):
         raise NotImplementedError
 
+    def _sample(self, model, prompt, temperature, max_tokens, i):
+        """One cached sample — the unit of work `complete` and `submit` share."""
+        ck = self.cache.key(self.name, model, temperature, max_tokens, i, prompt) if self.cache else None
+        if ck is not None:
+            hit = self.cache.get(ck)
+            if hit is not None:
+                return hit
+        txt = self._one(model, prompt, temperature, max_tokens)
+        if ck is not None:
+            self.cache.put(ck, txt)
+        return txt
+
     def complete(self, model, prompt, n=1, temperature=0.7, max_tokens=4000):
         """Return a list of n text samples for (model, prompt), generated concurrently."""
-        def call(i):
-            ck = self.cache.key(self.name, model, temperature, max_tokens, i, prompt) if self.cache else None
-            if ck is not None:
-                hit = self.cache.get(ck)
-                if hit is not None:
-                    return hit
-            txt = self._one(model, prompt, temperature, max_tokens)
-            if ck is not None:
-                self.cache.put(ck, txt)
-            return txt
-
         with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
-            return list(ex.map(call, range(n)))
+            return list(ex.map(
+                lambda i: self._sample(model, prompt, temperature, max_tokens, i), range(n)))
+
+    def submit(self, ex, model, prompt, n=1, temperature=0.7, max_tokens=4000):
+        """Queue n samples on a caller-owned executor; returns one Future per sample.
+
+        This is what lets the engine interleave decoding across models and verify
+        samples in completion order instead of blocking on a whole batch — the
+        backend (e.g. Ollama with OLLAMA_NUM_PARALLEL > 1) sees every request at
+        once and can batch them into a single decode pass.
+        """
+        return [ex.submit(self._sample, model, prompt, temperature, max_tokens, i)
+                for i in range(n)]
 
 
 class OpenRouterBackend(Backend):
@@ -131,16 +144,25 @@ class DemoBackend(Backend):
 class OllamaBackend(Backend):
     name = "ollama"
 
-    def __init__(self, host="http://localhost:11434", **kw):
+    def __init__(self, host="http://localhost:11434", num_ctx=None, **kw):
         super().__init__(**kw)
         self.host = host.rstrip("/")
+        # Per-request context cap. Ollama sizes a model's KV cache as
+        # num_ctx x OLLAMA_NUM_PARALLEL at load, so a server tuned with a big
+        # default context (e.g. 32k for coding-agent use) burns GPU memory on
+        # jury runs whose prompts are tiny. A lean num_ctx keeps parallel
+        # decode slots cheap enough that the whole council fits in memory.
+        self.num_ctx = num_ctx
 
     def _one(self, model, prompt, temperature, max_tokens):
+        options = {"temperature": temperature, "num_predict": max_tokens}
+        if self.num_ctx:
+            options["num_ctx"] = self.num_ctx
         body = json.dumps({
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "options": {"temperature": temperature, "num_predict": max_tokens},
+            "options": options,
         }).encode()
         for attempt in range(3):
             try:

@@ -24,10 +24,10 @@ def _read(path):
         sys.exit(f"error: cannot read {path}: {e}")
 
 
-def _backend(name):
+def _backend(name, num_ctx=None):
     if name == "ollama":
         from .backends import OllamaBackend
-        return OllamaBackend(cache_path=CACHE)
+        return OllamaBackend(cache_path=CACHE, num_ctx=num_ctx or None)
     from .backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -99,7 +99,7 @@ def cmd_solve(a):
     else:
         sys.exit("error: provide --tests (functional check) or --cases (stdin/stdout JSON)")
 
-    backend = _backend(a.backend)
+    backend = _backend(a.backend, num_ctx=a.num_ctx)
     panel = a.models.split(",") if a.models else None
     route = {}
     if a.brain:
@@ -123,7 +123,7 @@ def cmd_solve(a):
         fb = OpenRouterBackend(cache_path=CACHE)   # the frontier tier is a cloud model
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
-    r = Engine(backend, panel=panel, best=best, k=a.k,
+    r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
                frontier=a.frontier, frontier_backend=fb, route=route).solve(task, verifier)
 
     if a.json:
@@ -138,7 +138,13 @@ def cmd_solve(a):
             print(r.answer)            # only verified code reaches stdout
         else:
             sys.stderr.write((r.answer or "(no code extracted)") + "\n")
-    sys.exit(0 if r.verified else 1)
+    # Hard exit: an early verified win can leave samples still decoding on
+    # abandoned threads; sys.exit would join them and stall for up to a full
+    # generation. Dropping the process closes their connections, which is also
+    # what tells Ollama to cancel the leftover decodes and free the GPU.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0 if r.verified else 1)
 
 
 def cmd_demo(a):
@@ -177,6 +183,14 @@ def main():
                    'function-call cases (entry_point(*args) == expected)')
     s.add_argument("--backend", default="openrouter", choices=["openrouter", "ollama"])
     s.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
+    s.add_argument("--jobs", type=int, default=None,
+                   help="concurrent generation threads across a stage "
+                   "(default: k x panel size, capped at 16)")
+    s.add_argument("--num-ctx", type=int, default=8192,
+                   help="context window per request, --backend ollama only (default 8192; "
+                   "0 = the server's default). Ollama sizes each model's KV cache as "
+                   "num_ctx x OLLAMA_NUM_PARALLEL at load, so a lean value here is what "
+                   "lets the whole council decode in parallel without evictions")
     s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")

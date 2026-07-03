@@ -229,6 +229,72 @@ def test_engine_route_empty_uses_shared_backend():
     assert r.verified and r.model == "best"
 
 
+class _NeverVerifies:
+    """Sandbox-free verifier so timing tests measure decode, not docker startup."""
+    def verify(self, text):
+        return False
+
+
+class _VerifiesGood:
+    def verify(self, text):
+        return bool(text) and "a + b" in text
+
+
+def test_engine_stage_decodes_concurrently():
+    # Every sample takes ~0.25s to "decode". Serially, 3 models x k=2 = 1.5s of
+    # decode; with per-sample futures the stages overlap internally:
+    # ~0.25s (stage 1) + ~0.25s (stage 2, both panelists at once) + overhead.
+    import time
+    from llmjury.backends import Backend
+    from llmjury.engine import Engine
+
+    class _SlowBad(Backend):
+        name = "slow"
+
+        def _one(self, model, prompt, temperature, max_tokens):
+            time.sleep(0.25)
+            return _BAD
+
+    eng = Engine(_SlowBad(), panel=["best", "p1", "p2"], best="best", k=2)
+    t = time.time()
+    r = eng.solve("add", _NeverVerifies())
+    wall = time.time() - t
+    assert not r.verified and r.attempts == 6
+    assert wall < 1.2, f"council decode looks serialized: {wall:.2f}s for 6x0.25s samples"
+
+
+def test_engine_early_exit_does_not_wait_for_slow_samples():
+    # First sample verifies instantly; its k-1 siblings hang. solve() must return
+    # on the verified sample without joining the stragglers.
+    import time
+    import threading
+    from llmjury.backends import Backend
+    from llmjury.engine import Engine
+
+    class _FirstFastRestSlow(Backend):
+        name = "mixed"
+
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self._lock = threading.Lock()
+            self._calls = 0
+
+        def _one(self, model, prompt, temperature, max_tokens):
+            with self._lock:
+                self._calls += 1
+                first = self._calls == 1
+            if not first:
+                time.sleep(1.5)
+            return _GOOD
+
+    eng = Engine(_FirstFastRestSlow(), panel=["best"], best="best", k=3)
+    t = time.time()
+    r = eng.solve("add", _VerifiesGood())
+    wall = time.time() - t
+    assert r.verified and r.stage == "single"
+    assert wall < 1.0, f"early exit waited for abandoned samples: {wall:.2f}s"
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items()
                    if k.startswith("test_") and callable(v))

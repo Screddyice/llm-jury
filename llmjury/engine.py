@@ -3,10 +3,17 @@
 Default to the single best model + best-of-k (fast, fits memory). Escalate to the
 full diverse council only when nothing verifies — that's the regime where the
 council actually pays, and it keeps the common case cheap and memory-light.
+
+Within a stage everything is concurrent: all of the stage's samples (across all
+of its models) are queued at once, and verification runs in completion order —
+the sandbox checks finished samples while the backend keeps decoding the rest,
+and the first verified sample wins the stage. Across stages the escalation
+ladder stays strictly sequential; that's the cost model.
 """
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from .verifiers import extract_code
@@ -26,13 +33,13 @@ class Result:
     verified: bool          # did it pass the verifier?
     model: str | None       # which model produced the chosen sample
     stage: str              # "single", "council", "frontier", or "unverified"
-    attempts: int           # total samples generated
+    attempts: int           # samples that finished generating before the verdict
 
 
 class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
                  k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
-                 route=None):
+                 route=None, workers=None):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -48,54 +55,99 @@ class Engine:
         # fine-tuned MLX brain on an OpenAI-compatible endpoint — sit in the council
         # alongside the default panel. Empty by default, so the common path is unchanged.
         self.route = route or {}
+        # Generation threads shared by all of a solve()'s stages. The default is
+        # sized so an entire council stage (every panelist x k samples) can be
+        # in flight at once.
+        self.workers = workers or min(16, max(4, self.k * max(1, len(self.panel))))
 
-    def _gen(self, model, prompt, n):
-        backend = self.route.get(model, self.backend)
-        texts = backend.complete(model, prompt, n=n,
-                                 temperature=self.temperature, max_tokens=self.max_tokens)
-        return [(model, t) for t in texts]
+    def _submit(self, ex, pairs, prompt):
+        """Queue k samples for every (model, backend) pair; return {future: model}.
+
+        Backends that expose `submit` (all the built-ins) give one future per
+        sample, so decoding interleaves across models and samples. A duck-typed
+        backend that only has `complete` gets one future wrapping its whole
+        batch — same result, just coarser overlap.
+        """
+        futs = {}
+        for model, backend in pairs:
+            if hasattr(backend, "submit"):
+                for f in backend.submit(ex, model, prompt, n=self.k,
+                                        temperature=self.temperature,
+                                        max_tokens=self.max_tokens):
+                    futs[f] = model
+            else:
+                futs[ex.submit(backend.complete, model, prompt, self.k,
+                               self.temperature, self.max_tokens)] = model
+        return futs
 
     def solve(self, task, verifier, escalate=True):
+        """Solve a task; returns the first verified Result the ladder produces.
+
+        On an early verified exit, samples still decoding are abandoned — their
+        threads finish (and are discarded) in the background. The CLI exits the
+        process right after printing, which closes those connections and lets
+        the backend cancel the leftover decodes.
+        """
         prompt = self.prompt_template.format(task=task)
-        attempts = 0
+        seen = []       # every completed (model, text): attempt count + fallback pool
 
-        # Stage 1: single best model, best-of-k.
-        cand = self._gen(self.best, prompt, self.k)
-        attempts += len(cand)
-        for model, text in cand:
-            if verifier.verify(text):
-                return Result(extract_code(text), text, True, model, "single", attempts)
+        def backend_for(m):
+            return self.route.get(m, self.backend)
 
-        # Stage 2: escalate to the diverse council (skip best, already tried).
-        if escalate:
-            for m in [m for m in self.panel if m != self.best]:
-                for model, text in self._gen(m, prompt, self.k):
-                    attempts += 1
+        def run_stage(ex, pairs, stage):
+            for fut, model in _in_completion_order(self._submit(ex, pairs, prompt)):
+                out = fut.result()
+                for text in ([out] if isinstance(out, str) else out):
+                    seen.append((model, text))
                     if verifier.verify(text):
-                        return Result(extract_code(text), text, True, model, "council", attempts)
+                        return Result(extract_code(text), text, True, model, stage, len(seen))
+            return None
 
-        # Stage 3: opt-in frontier escalation — one strong (cloud) model, only when the local
-        # council couldn't verify. This is what lets a local-first setup match a cloud fusion's
-        # accuracy while paying for a frontier call on the hard minority, not on every problem.
-        if escalate and self.frontier:
-            for text in self.frontier_backend.complete(
-                    self.frontier, prompt, n=self.k,
-                    temperature=self.temperature, max_tokens=self.max_tokens):
-                attempts += 1
-                if verifier.verify(text):
-                    return Result(extract_code(text), text, True, self.frontier, "frontier", attempts)
+        ex = ThreadPoolExecutor(max_workers=self.workers)
+        try:
+            # Stage 1: single best model, best-of-k.
+            r = run_stage(ex, [(self.best, backend_for(self.best))], "single")
+            if r:
+                return r
+
+            # Stage 2: the rest of the diverse council, all panelists at once
+            # (skip best, already tried).
+            if escalate:
+                rest = [(m, backend_for(m)) for m in self.panel if m != self.best]
+                if rest:
+                    r = run_stage(ex, rest, "council")
+                    if r:
+                        return r
+
+            # Stage 3: opt-in frontier escalation — one strong (cloud) model, only when
+            # the local council couldn't verify. This is what lets a local-first setup
+            # match a cloud fusion's accuracy while paying for a frontier call on the
+            # hard minority, not on every problem.
+            if escalate and self.frontier:
+                r = run_stage(ex, [(self.frontier, self.frontier_backend)], "frontier")
+                if r:
+                    return r
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
 
         # Nothing verified — return the most complete best-effort (longest extractable
-        # code), flagged unverified, rather than blindly the first sample.
+        # code) across everything generated, flagged unverified, rather than blindly
+        # the first sample.
         best = None
-        for model, text in cand:
+        for model, text in seen:
             code = extract_code(text)
             if code and (best is None or len(code) > len(best[2])):
                 best = (model, text, code)
         if best:
-            return Result(best[2], best[1], False, best[0], "unverified", attempts)
-        first_model, first_text = cand[0] if cand else (None, None)
-        return Result(None, first_text, False, first_model, "unverified", attempts)
+            return Result(best[2], best[1], False, best[0], "unverified", len(seen))
+        first_model, first_text = seen[0] if seen else (None, None)
+        return Result(None, first_text, False, first_model, "unverified", len(seen))
+
+
+def _in_completion_order(futmap):
+    """Yield (future, model) pairs as generation finishes, not submission order."""
+    for fut in as_completed(futmap):
+        yield fut, futmap[fut]
 
 
 def solve(task, verifier, backend=None, **kw):
