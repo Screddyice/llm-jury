@@ -187,6 +187,37 @@ def test_demo_backend_escalates_and_verifies():
     assert r.verified and r.stage == "council" and r.model == "demo-council"
 
 
+def test_codex_backend_runs_ephemeral_read_only_generation():
+    from llmjury.backends import CodexBackend
+
+    calls = []
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, stdout=_GOOD + "\n", stderr="")
+
+    backend = CodexBackend(runner=runner)
+    assert backend.complete("gpt-test", "write add", n=1) == [_GOOD]
+    cmd, kw = calls[0]
+    assert cmd[:2] == ["codex", "exec"]
+    assert "--ephemeral" in cmd and "read-only" in cmd
+    assert "--ignore-user-config" in cmd and "--ignore-rules" in cmd
+    assert cmd.count("--disable") == 2
+    assert "shell_tool" in cmd and "unified_exec" in cmd
+    assert cmd[cmd.index("--model") + 1] == "gpt-test"
+    assert 'model_reasoning_effort="low"' in cmd
+    assert cmd[-1] == "write add"
+    assert kw["timeout"] == 600 and not kw["check"]
+
+
+def test_cli_backend_builds_codex_provider():
+    from unittest.mock import patch
+    from llmjury.cli import _backend
+
+    with patch("llmjury.backends.shutil.which", return_value="/usr/local/bin/codex"):
+        assert _backend("codex").name == "codex"
+
+
 def test_engine_frontier_escalation():
     from llmjury.engine import Engine
     # local council fails everything; a separate frontier backend solves it on the last tier

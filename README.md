@@ -69,6 +69,15 @@ llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.
 # frontier model — Fusion-class accuracy, a frontier call on the hard minority, not on everything
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
     --backend ollama --frontier deepseek/deepseek-v4-pro   # needs OPENROUTER_API_KEY
+
+# Codex-native hybrid: local council first, then the authenticated Codex CLI.
+# No OpenAI API key is required; this reuses `codex login` / ChatGPT-managed auth.
+llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-point add \
+    --backend ollama --frontier gpt-5.6-sol --frontier-backend codex
+
+# Codex as the generation provider for every tier (single model, best-of-k).
+llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-point add \
+    --backend codex --models gpt-5.6-sol
 ```
 
 **Python:**
@@ -146,6 +155,20 @@ intervals, the public-test oracle, the fairness disclosure — are in [BENCHMARK
   ollama pull phi4 && ollama pull gemma3:12b && ollama pull llama3.1:8b
   ```
 - **OpenRouter (cloud)** — `--backend openrouter` (default). Set `OPENROUTER_API_KEY`.
+- **Codex CLI (authenticated OpenAI provider)** — `--backend codex`, or use
+  `--frontier-backend codex` after a local council. It runs ephemeral, read-only
+  `codex exec` sessions and reuses the existing Codex login. The default model for
+  this checkout is `gpt-5.6-sol`; set `LLMJURY_CODEX_MODEL` to change that default,
+  or override it per invocation with `--models` or `--frontier`.
+  Candidate-generation sessions disable Codex's shell tools as an additional guard
+  against reading unrelated host files.
+  Jury calls default to low reasoning effort because the independent verifier supplies
+  the acceptance gate; Python callers can override `CodexBackend(reasoning_effort=...)`.
+
+The frontier provider is explicit. `--frontier-backend openrouter` accepts OpenRouter
+slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a model
+available to the installed Codex CLI and uses Codex authentication. OpenRouter is not
+coupled to Anthropic: any compatible OpenRouter model slug can be used.
 
 A diverse, cross-lineage panel (different labs → different mistakes) is the point. The defaults
 are Phi-4 (Microsoft) + Gemma-3-12B (Google) + Llama-3.1-8B (Meta); swap your own in
@@ -166,7 +189,7 @@ figures are the larger full runs from the write-up.)
 
 ## Status
 
-`v0.1` — working engine, code verifiers (functional + stdin/stdout), Ollama + OpenRouter
+`v0.1` — working engine, code verifiers (functional + stdin/stdout), Codex + Ollama + OpenRouter
 backends, escalating council, and `llmjury reproduce`. Next: a real sandbox (container) for
 untrusted input, more verifiers (math, citations), and a task classifier that picks the
 strategy automatically.

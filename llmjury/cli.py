@@ -28,6 +28,9 @@ def _backend(name, num_ctx=None):
     if name == "ollama":
         from .backends import OllamaBackend
         return OllamaBackend(cache_path=CACHE, num_ctx=num_ctx or None)
+    if name == "codex":
+        from .backends import CodexBackend
+        return CodexBackend(cache_path=CACHE)
     from .backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -119,8 +122,7 @@ def cmd_solve(a):
     best = a.best or (panel[0] if panel else None)
     fb = None
     if a.frontier:
-        from .backends import OpenRouterBackend
-        fb = OpenRouterBackend(cache_path=CACHE)   # the frontier tier is a cloud model
+        fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
@@ -181,7 +183,8 @@ def main():
     s.add_argument("--cases", help='JSON file of cases. Alone: [{"input": "...", "output": "..."}] '
                    'stdin/stdout cases. With --entry-point: [{"args": [2, 3], "expected": 5}] '
                    'function-call cases (entry_point(*args) == expected)')
-    s.add_argument("--backend", default="openrouter", choices=["openrouter", "ollama"])
+    s.add_argument("--backend", default="openrouter",
+                   choices=["openrouter", "ollama", "codex"])
     s.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
     s.add_argument("--jobs", type=int, default=None,
                    help="concurrent generation threads across a stage "
@@ -195,7 +198,10 @@ def main():
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
     s.add_argument("--frontier", help="opt-in: a strong cloud model (e.g. deepseek/deepseek-v4-pro) "
-                   "to escalate to when the local council can't verify (needs OPENROUTER_API_KEY)")
+                   "to escalate to when the council can't verify")
+    s.add_argument("--frontier-backend", default="openrouter",
+                   choices=["openrouter", "codex"],
+                   help="provider for --frontier (default: openrouter; codex reuses Codex CLI auth)")
     s.add_argument("--brain", action="store_true",
                    help="add Shawn's fine-tuned MLX brain as an extra council panelist via an "
                    "OpenAI-compatible endpoint (default the local mlx_lm.server). It joins the "
