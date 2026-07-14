@@ -122,6 +122,7 @@ Codex frames the task and oracle
 Run that policy with:
 
 ```bash
+export OPENROUTER_API_KEY="..."   # or store it in ~/.llmjury/.env
 llmjury solve --task task.txt --tests tests.py --entry-point solve \
     --backend ollama --frontier auto --json
 ```
