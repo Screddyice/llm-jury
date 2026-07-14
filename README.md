@@ -6,7 +6,7 @@
 [![dependencies](https://img.shields.io/badge/dependencies-0-success)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Quickstart](#quickstart) · [How it works](#how-it-works) · [Benchmarks](#benchmarks) · [Write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb) · [Paper →](https://app.notion.com/p/3874834c4d78817f99a0fc26088ed7e4)
+[Quickstart](#quickstart) · [Codex Fusion](#codex-fusion) · [How it works](#how-it-works) · [Benchmarks](#benchmarks) · [Write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb) · [Paper →](https://app.notion.com/p/3874834c4d78817f99a0fc26088ed7e4)
 
 **Local verified answers. Don't vote, verify.**
 
@@ -15,8 +15,8 @@ A frontier API gives you one answer and asks you to trust it. LLM-Jury gives you
 
 It runs model-generated code through a real verifier and returns only what **provably passes** —
 not the answer that got the most votes. The result: a council of small open models on your machine,
-plus *one* opt-in frontier escalation on the hard minority, **matches a commercial frontier-model
-fusion on hard code — at ~38× lower cost.**
+plus opt-in, verifier-gated cloud escalation for the hard minority. The benchmarked hybrid
+**matches a commercial frontier-model fusion on hard code at ~38× lower cost.**
 
 > **Measured head-to-head — 45 hard LiveCodeBench problems, same oracle** ([full numbers + methodology →](BENCHMARKS.md)):
 
@@ -46,11 +46,11 @@ llmjury demo                 # 5-second offline demo — no API key, nothing to 
 offline backend: a "weak" model returns a wrong answer, the verifier catches it, and the council's
 answer passes. That's the whole product, offline.
 
-> **⚠️ Security.** LLM-Jury *executes model-generated code* to verify it — that's the whole
-> point, and it's inherently risky. v0.1 isolates execution (scrubbed environment, isolated
-> temp directory, CPU/file-size limits) but is **not a real sandbox**. Don't run untrusted
-> tasks on a machine with secrets, and don't run as root. For real isolation, run it inside a
-> container or VM.
+> **⚠️ Security.** LLM-Jury *executes model-generated code* to verify it. The default
+> `LLMJURY_SANDBOX=auto` provisions a throwaway Docker/Colima container with no network,
+> dropped capabilities, a non-root user, and resource limits. If a container cannot start,
+> it falls back to the hardened host runner and prints that fact. Use
+> `LLMJURY_SANDBOX=docker` to require container isolation; never run as root.
 
 ---
 
@@ -105,6 +105,49 @@ verifier = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0)])
 (`--tests` also accepts either a full `def check(candidate): ...` or just its body. And
 `llmjury solve --json` emits a machine-readable result for piping into CI/agents.)
 
+## Codex Fusion
+
+The recommended Codex workflow keeps candidate generation local until the verifier proves
+the local council needs help:
+
+```text
+Codex frames the task and oracle
+  → Phi-4 on local Ollama
+  → Gemma 3 12B + Llama 3.1 8B only if Phi-4 fails
+  → DeepSeek V4 Flash on OpenRouter only if the local council fails
+  → DeepSeek V4 Pro only if Flash also fails
+  → return the first candidate that passes the oracle
+```
+
+Run that policy with:
+
+```bash
+llmjury solve --task task.txt --tests tests.py --entry-point solve \
+    --backend ollama --frontier auto --json
+```
+
+The distinction matters: **the council is local and private through Ollama; the DeepSeek
+models are open-weight but remotely hosted through OpenRouter.** A task leaves the machine
+only after every local candidate fails verification. The CLI prints the selected stage and
+model, so an orchestrating Codex session can report when paid escalation actually occurred.
+
+`auto` uses a capability ladder instead of guessing difficulty from task keywords. The
+verifier is the router: Flash gets the first inexpensive recovery attempt, Pro receives only
+the unresolved tail, and neither can introduce an accepted regression because its output must
+pass the same tests.
+
+To use authenticated Codex itself as the final provider instead of OpenRouter:
+
+```bash
+llmjury solve --task task.txt --tests tests.py --entry-point solve \
+    --backend ollama --frontier gpt-5.6-sol --frontier-backend codex
+```
+
+That path reuses `codex login`, launches an ephemeral read-only generation session, ignores
+repository rules and user configuration, and disables shell tools. Pin any explicit
+OpenRouter slug with `--frontier <provider/model>` when reproducing a benchmark or comparing
+a particular model.
+
 ## How it works
 
 Three small models you can run for free on a laptop, plus a verifier, match or beat a frontier
@@ -147,6 +190,11 @@ n=45) — so read it as parity-or-better, not a proven win. And we *gave Fusion 
 advantage* on 5 problems it first truncated, which only helped it. "Correct" here means "passes the
 public sample tests," and the escalated ~25% do leave the device. Full caveats — confidence
 intervals, the public-test oracle, the fairness disclosure — are in [BENCHMARKS.md](BENCHMARKS.md).
+
+The table reports the historical benchmark configuration: local council followed by a pinned
+DeepSeek V4 Pro best-of-4 escalation. The newer `--frontier auto` Flash → Pro ladder is designed
+to reduce the cost of the unresolved tail without weakening acceptance, but it should not be
+read as a separately measured benchmark result until that exact policy is reproduced.
 
 ## Backends
 
@@ -195,10 +243,9 @@ figures are the larger full runs from the write-up.)
 
 ## Status
 
-`v0.1` — working engine, code verifiers (functional + stdin/stdout), Codex + Ollama + OpenRouter
-backends, escalating council, and `llmjury reproduce`. Next: a real sandbox (container) for
-untrusted input, more verifiers (math, citations), and a task classifier that picks the
-strategy automatically.
+`v0.1` — working engine, functional and stdin/stdout verifiers, auto-provisioned container
+sandbox, Codex + Ollama + OpenRouter backends, verifier-gated frontier ladders, and
+`llmjury reproduce`. Next: more verifier types and benchmark runs for adaptive routing policies.
 
 ## License
 
