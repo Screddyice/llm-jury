@@ -48,7 +48,9 @@ class Engine:
         self.k = k
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.frontier = frontier                          # opt-in strong model for the last tier
+        # One model or an ordered verifier-gated ladder. Each model is attempted
+        # only after every cheaper/local tier failed the same oracle.
+        self.frontier = ([frontier] if isinstance(frontier, str) else list(frontier or []))
         self.frontier_backend = frontier_backend or backend
         # Per-model backend overrides: a panelist named here generates through its own
         # backend instead of the shared one. Lets a custom local model — e.g. a
@@ -124,9 +126,10 @@ class Engine:
             # match a cloud fusion's accuracy while paying for a frontier call on the
             # hard minority, not on every problem.
             if escalate and self.frontier:
-                r = run_stage(ex, [(self.frontier, self.frontier_backend)], "frontier")
-                if r:
-                    return r
+                for model in self.frontier:
+                    r = run_stage(ex, [(model, self.frontier_backend)], "frontier")
+                    if r:
+                        return r
         finally:
             ex.shutdown(wait=False, cancel_futures=True)
 

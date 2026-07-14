@@ -65,10 +65,9 @@ llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-
 # or competitive-programming style (stdin/stdout cases as JSON)
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json
 
-# hybrid: run the local council, and escalate ONLY what it can't verify to one
-# frontier model — Fusion-class accuracy, a frontier call on the hard minority, not on everything
+# hybrid: local council first, then a verifier-gated open-weight OpenRouter ladder
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
-    --backend ollama --frontier deepseek/deepseek-v4-pro   # needs OPENROUTER_API_KEY
+    --backend ollama --frontier auto   # needs OPENROUTER_API_KEY
 
 # Codex-native hybrid: local council first, then the authenticated Codex CLI.
 # No OpenAI API key is required; this reuses `codex login` / ChatGPT-managed auth.
@@ -117,13 +116,14 @@ task + verifier
   → VERIFY     run the verifier on each (code = run the tests)
   → SELECT     return the one that provably passes
   → ESCALATE   one model first → add the council only when nothing passes
-               → (optional) one frontier model only when the council can't either
+               → (optional) ordered frontier models only when earlier tiers fail
 ```
 
 That tiered escalation is what keeps it laptop-friendly *and* lets it reach frontier-class
 accuracy: the common case runs **one** model fast, hard problems load the full local council, and —
 if you opt in with `--frontier` — the small hard minority the council can't verify escalates to a
-single cloud model. You pay for the frontier only on the problems that need it, not on every call.
+cloud model or ordered ladder. You pay for cloud inference only on the problems that need it, and
+each later model runs only when the earlier one still cannot produce a verified answer.
 
 **The rule LLM-Jury is built on:** combining models helps *exactly when you can check the answer
 cheaply and independently.* Code has a real oracle (run the tests), so the council wins. Tasks
@@ -169,6 +169,12 @@ The frontier provider is explicit. `--frontier-backend openrouter` accepts OpenR
 slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a model
 available to the installed Codex CLI and uses Codex authentication. OpenRouter is not
 coupled to Anthropic: any compatible OpenRouter model slug can be used.
+
+`--frontier auto` is the recommended local-first policy. It keeps the cross-lineage
+Ollama council first, then tries DeepSeek V4 Flash for a low-cost cloud recovery and
+DeepSeek V4 Pro for the hard remainder. Every later tier runs only when all earlier
+candidates failed the same oracle, so the faster model cannot lower accuracy. Pin a
+slug instead when reproducing a historical benchmark or testing a specific model.
 
 A diverse, cross-lineage panel (different labs → different mistakes) is the point. The defaults
 are Phi-4 (Microsoft) + Gemma-3-12B (Google) + Llama-3.1-8B (Meta); swap your own in

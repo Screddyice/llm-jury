@@ -41,6 +41,16 @@ def _refuse_root():
                  "Set LLMJURY_ALLOW_ROOT=1 to override (not recommended).")
 
 
+def _frontier_models(value, backend_name):
+    """Resolve CLI shorthand without making a provider call."""
+    if value != "auto":
+        return value
+    if backend_name != "openrouter":
+        raise ValueError("--frontier auto requires --frontier-backend openrouter")
+    from .panels import OPEN_SOURCE_FRONTIER
+    return list(OPEN_SOURCE_FRONTIER)
+
+
 def _func_cases(raw):
     """Convert --cases JSON into (args_tuple, expected) pairs for a function call.
 
@@ -120,13 +130,21 @@ def cmd_solve(a):
             f"[llmjury] brain panelist: {a.brain_model} via {a.brain_url} "
             "(extra council member, not the stage-1 best)\n")
     best = a.best or (panel[0] if panel else None)
+    try:
+        frontier = _frontier_models(a.frontier, a.frontier_backend)
+    except ValueError as e:
+        sys.exit(f"error: {e}")
+    if a.frontier == "auto":
+        sys.stderr.write(
+            "[llmjury] open-source auto route: local council -> "
+            + " -> ".join(frontier) + " (verifier-gated)\n")
     fb = None
-    if a.frontier:
+    if frontier:
         fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
-               frontier=a.frontier, frontier_backend=fb, route=route).solve(task, verifier)
+               frontier=frontier, frontier_backend=fb, route=route).solve(task, verifier)
 
     if a.json:
         import dataclasses
@@ -197,8 +215,8 @@ def main():
     s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
-    s.add_argument("--frontier", help="opt-in: a strong cloud model (e.g. deepseek/deepseek-v4-pro) "
-                   "to escalate to when the council can't verify")
+    s.add_argument("--frontier", help="opt-in: a cloud model to try when the council can't verify; "
+                   "use 'auto' for the verifier-gated open-weight OpenRouter ladder")
     s.add_argument("--frontier-backend", default="openrouter",
                    choices=["openrouter", "codex"],
                    help="provider for --frontier (default: openrouter; codex reuses Codex CLI auth)")

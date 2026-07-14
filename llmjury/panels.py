@@ -18,6 +18,15 @@ LOCAL_BEST = "phi4"
 CODEX_BEST = os.environ.get("LLMJURY_CODEX_MODEL", "gpt-5.6-sol")
 CODEX_PANEL = [CODEX_BEST]
 
+# Verifier-gated OpenRouter escalation. These are deliberately ordered by role,
+# not fanned out on every task: Flash is the low-cost first cloud recovery, then
+# Pro is the benchmark-backed accuracy tier for the genuinely hard remainder.
+# Both are open-weight models; the local council remains the default first line.
+OPEN_SOURCE_FRONTIER = [
+    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-v4-pro",
+]
+
 
 def default_panel(backend_name):
     if backend_name == "ollama":

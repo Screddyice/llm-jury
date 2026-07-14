@@ -20,5 +20,7 @@ Tests must remain offline by default. Mock provider processes and HTTP calls in 
   frontier tier. It must run ephemeral and read-only for candidate generation.
 - OpenRouter is a model-agnostic cloud provider. Do not couple it to Anthropic or any
   single model family.
+- The recommended hybrid route is `--backend ollama --frontier auto`: local council
+  first, then the ordered open-weight OpenRouter ladder only when verification fails.
 - The verifier, not the provider, decides which candidate is accepted.
 - Never expose auth files, API keys, or the parent process environment to generated code.
