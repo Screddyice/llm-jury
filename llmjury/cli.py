@@ -28,6 +28,9 @@ def _backend(name, num_ctx=None):
     if name == "ollama":
         from .backends import OllamaBackend
         return OllamaBackend(cache_path=CACHE, num_ctx=num_ctx or None)
+    if name == "codex":
+        from .backends import CodexBackend
+        return CodexBackend(cache_path=CACHE)
     from .backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -36,6 +39,16 @@ def _refuse_root():
     if hasattr(os, "geteuid") and os.geteuid() == 0 and os.environ.get("LLMJURY_ALLOW_ROOT") != "1":
         sys.exit("error: refusing to run as root — LLM-Jury executes model-generated code. "
                  "Set LLMJURY_ALLOW_ROOT=1 to override (not recommended).")
+
+
+def _frontier_models(value, backend_name):
+    """Resolve CLI shorthand without making a provider call."""
+    if value != "auto":
+        return value
+    if backend_name != "openrouter":
+        raise ValueError("--frontier auto requires --frontier-backend openrouter")
+    from .panels import OPEN_SOURCE_FRONTIER
+    return list(OPEN_SOURCE_FRONTIER)
 
 
 def _func_cases(raw):
@@ -117,14 +130,21 @@ def cmd_solve(a):
             f"[llmjury] brain panelist: {a.brain_model} via {a.brain_url} "
             "(extra council member, not the stage-1 best)\n")
     best = a.best or (panel[0] if panel else None)
+    try:
+        frontier = _frontier_models(a.frontier, a.frontier_backend)
+    except ValueError as e:
+        sys.exit(f"error: {e}")
+    if a.frontier == "auto":
+        sys.stderr.write(
+            "[llmjury] open-source auto route: local council -> "
+            + " -> ".join(frontier) + " (verifier-gated)\n")
     fb = None
-    if a.frontier:
-        from .backends import OpenRouterBackend
-        fb = OpenRouterBackend(cache_path=CACHE)   # the frontier tier is a cloud model
+    if frontier:
+        fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
-               frontier=a.frontier, frontier_backend=fb, route=route).solve(task, verifier)
+               frontier=frontier, frontier_backend=fb, route=route).solve(task, verifier)
 
     if a.json:
         import dataclasses
@@ -181,7 +201,8 @@ def main():
     s.add_argument("--cases", help='JSON file of cases. Alone: [{"input": "...", "output": "..."}] '
                    'stdin/stdout cases. With --entry-point: [{"args": [2, 3], "expected": 5}] '
                    'function-call cases (entry_point(*args) == expected)')
-    s.add_argument("--backend", default="openrouter", choices=["openrouter", "ollama"])
+    s.add_argument("--backend", default="openrouter",
+                   choices=["openrouter", "ollama", "codex"])
     s.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
     s.add_argument("--jobs", type=int, default=None,
                    help="concurrent generation threads across a stage "
@@ -194,8 +215,11 @@ def main():
     s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
-    s.add_argument("--frontier", help="opt-in: a strong cloud model (e.g. deepseek/deepseek-v4-pro) "
-                   "to escalate to when the local council can't verify (needs OPENROUTER_API_KEY)")
+    s.add_argument("--frontier", help="opt-in: a cloud model to try when the council can't verify; "
+                   "use 'auto' for the verifier-gated open-weight OpenRouter ladder")
+    s.add_argument("--frontier-backend", default="openrouter",
+                   choices=["openrouter", "codex"],
+                   help="provider for --frontier (default: openrouter; codex reuses Codex CLI auth)")
     s.add_argument("--brain", action="store_true",
                    help="add Shawn's fine-tuned MLX brain as an extra council panelist via an "
                    "OpenAI-compatible endpoint (default the local mlx_lm.server). It joins the "

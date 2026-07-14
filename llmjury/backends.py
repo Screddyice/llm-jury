@@ -1,4 +1,4 @@
-"""Model backends: local (Ollama) and cloud (OpenRouter), one interface.
+"""Model backends: Codex, local Ollama, and cloud OpenRouter, one interface.
 
 A backend turns (model, prompt) into text samples. Diversity across samples comes
 from temperature > 0; we make one request per sample and run them concurrently.
@@ -10,6 +10,9 @@ import json
 import time
 import urllib.request
 import urllib.error
+import shutil
+import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 from .cache import Cache
@@ -123,6 +126,65 @@ class OpenRouterBackend(Backend):
             except Exception:
                 time.sleep(3 * (attempt + 1))
         return ""
+
+
+class CodexBackend(Backend):
+    """Generate candidates through the authenticated Codex CLI.
+
+    Codex is run as an ephemeral, read-only generator with shell tools disabled in an
+    empty working directory. This deliberately avoids repo tools and repo instructions:
+    LLM-Jury supplies the task and independently verifies the returned code itself.
+    """
+    name = "codex"
+
+    def __init__(self, executable="codex", timeout=600, reasoning_effort="low",
+                 runner=None, **kw):
+        super().__init__(**kw)
+        self.executable = executable
+        self.timeout = timeout
+        self.reasoning_effort = reasoning_effort
+        self.runner = runner or subprocess.run
+        if runner is None and not shutil.which(executable):
+            raise RuntimeError(
+                "Codex CLI not found. Install and authenticate Codex, or use "
+                "--backend ollama/openrouter.")
+
+    def _one(self, model, prompt, temperature, max_tokens):
+        # Codex owns its sampling and output budget. Keeping the Backend signature
+        # lets it participate in the same verified escalation ladder.
+        with tempfile.TemporaryDirectory(prefix="llmjury-codex-") as workdir:
+            cmd = [
+                self.executable, "exec", "--ephemeral", "--sandbox", "read-only",
+                "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules",
+                "--disable", "shell_tool", "--disable", "unified_exec",
+                "--color", "never", "--cd", workdir,
+            ]
+            if model:
+                cmd.extend(["--model", model])
+            if self.reasoning_effort:
+                cmd.extend(["-c", f'model_reasoning_effort="{self.reasoning_effort}"'])
+            cmd.append(prompt)
+            try:
+                completed = self.runner(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    timeout=self.timeout, check=False,
+                )
+            except subprocess.TimeoutExpired:
+                sys.stderr.write(
+                    f"[llmjury] codex {model or '(configured default)'} timed out "
+                    f"after {self.timeout}s\n")
+                return ""
+            except OSError as e:
+                sys.stderr.write(f"[llmjury] cannot run Codex CLI: {e}\n")
+                return ""
+            if completed.returncode != 0:
+                detail = (completed.stderr or "").strip().splitlines()
+                suffix = f": {detail[-1]}" if detail else ""
+                sys.stderr.write(
+                    f"[llmjury] codex {model or '(configured default)'} exited "
+                    f"{completed.returncode}{suffix}\n")
+                return ""
+            return (completed.stdout or "").strip()
 
 
 class DemoBackend(Backend):

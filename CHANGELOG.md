@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add an authenticated Codex CLI backend for direct generation or frontier escalation.
+- Add `--frontier-backend` so Codex and OpenRouter are explicit, interchangeable
+  frontier providers instead of coupling escalation to OpenRouter.
+- Allow `LLMJURY_CODEX_MODEL` to override the checked-in Codex model default and
+  disable shell tools in Codex candidate-generation sessions.
+- Add `--frontier auto`, a verifier-gated OpenRouter ladder that tries open-weight
+  DeepSeek V4 Flash before the benchmark-backed V4 Pro accuracy tier.
+- Allow ordered frontier ladders in `Engine` while preserving single-model callers.
+
 Notable changes to LLM-Jury. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions follow [SemVer](https://semver.org/).
 

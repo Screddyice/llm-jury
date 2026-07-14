@@ -104,8 +104,10 @@ class _FakeBackend:
 
     def __init__(self, responses):
         self.responses = responses  # {model: [text, ...]}
+        self.calls = []
 
     def complete(self, model, prompt, n=1, temperature=0.7, max_tokens=4000):
+        self.calls.append((model, prompt, n, temperature, max_tokens))
         r = self.responses.get(model, [""])
         return [r[i % len(r)] for i in range(n)]
 
@@ -187,6 +189,49 @@ def test_demo_backend_escalates_and_verifies():
     assert r.verified and r.stage == "council" and r.model == "demo-council"
 
 
+def test_codex_backend_runs_ephemeral_read_only_generation():
+    from llmjury.backends import CodexBackend
+
+    calls = []
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, stdout=_GOOD + "\n", stderr="")
+
+    backend = CodexBackend(runner=runner)
+    assert backend.complete("gpt-test", "write add", n=1) == [_GOOD]
+    cmd, kw = calls[0]
+    assert cmd[:2] == ["codex", "exec"]
+    assert "--ephemeral" in cmd and "read-only" in cmd
+    assert "--ignore-user-config" in cmd and "--ignore-rules" in cmd
+    assert cmd.count("--disable") == 2
+    assert "shell_tool" in cmd and "unified_exec" in cmd
+    assert cmd[cmd.index("--model") + 1] == "gpt-test"
+    assert 'model_reasoning_effort="low"' in cmd
+    assert cmd[-1] == "write add"
+    assert kw["timeout"] == 600 and not kw["check"]
+
+
+def test_cli_backend_builds_codex_provider():
+    from unittest.mock import patch
+    from llmjury.cli import _backend
+
+    with patch("llmjury.backends.shutil.which", return_value="/usr/local/bin/codex"):
+        assert _backend("codex").name == "codex"
+
+
+def test_cli_auto_frontier_resolves_open_source_ladder():
+    from llmjury.cli import _frontier_models
+    from llmjury.panels import OPEN_SOURCE_FRONTIER
+    assert _frontier_models("auto", "openrouter") == OPEN_SOURCE_FRONTIER
+    assert _frontier_models("custom/model", "openrouter") == "custom/model"
+    try:
+        _frontier_models("auto", "codex")
+        assert False, "auto must reject non-OpenRouter frontier backends"
+    except ValueError:
+        pass
+
+
 def test_engine_frontier_escalation():
     from llmjury.engine import Engine
     # local council fails everything; a separate frontier backend solves it on the last tier
@@ -196,6 +241,20 @@ def test_engine_frontier_escalation():
                  frontier="front", frontier_backend=frontier_bk)
     r = eng.solve("add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
     assert r.verified and r.stage == "frontier" and r.model == "front"
+
+
+def test_engine_frontier_ladder_is_verifier_gated():
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
+    # The local council and cheap cloud tier fail; the strong final tier passes.
+    # Ordering matters: later models must not run after a verified result.
+    local = _FakeBackend({"local": [_BAD]})
+    frontier = _FakeBackend({"flash": [_BAD], "pro": [_GOOD], "unused": [_GOOD]})
+    r = Engine(local, panel=["local"], best="local", k=1,
+               frontier=["flash", "pro", "unused"], frontier_backend=frontier) \
+        .solve("implement add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
+    assert r.verified and r.stage == "frontier" and r.model == "pro"
+    assert [call[0] for call in frontier.calls] == ["flash", "pro"]
 
 
 def test_timeout_is_bounded():
