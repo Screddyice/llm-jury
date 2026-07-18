@@ -17,6 +17,8 @@ WARNING = (
 
 
 def _read(path):
+    if path == "-":
+        return sys.stdin.read()
     try:
         with open(path, encoding="utf-8") as f:
             return f.read()
@@ -188,6 +190,71 @@ def cmd_reproduce(a):
     reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace)
 
 
+def cmd_delegate(a):
+    from .delegation import CodexDelegator
+    task = _read(a.task)
+    try:
+        result = CodexDelegator(timeout=a.timeout).delegate(
+            task, a.workspace, model=a.model, effort=a.effort,
+            sandbox=a.sandbox, add_dirs=a.add_dir,
+        )
+    except (RuntimeError, ValueError) as exc:
+        sys.exit(f"error: {exc}")
+    if a.json:
+        print(json.dumps(result.to_dict()))
+    else:
+        print(f"[{result.status}] {result.summary}")
+        if result.changed_files:
+            print("changed: " + ", ".join(result.changed_files))
+        for check in result.tests:
+            print("check: " + check)
+        for blocker in result.blockers:
+            print("blocker: " + blocker, file=sys.stderr)
+    sys.exit(0 if result.status == "completed" and result.returncode == 0 else 1)
+
+
+def cmd_install_claude(a):
+    from .claude_integration import install_claude_skill
+    try:
+        path, changed = install_claude_skill(
+            scope=a.scope, project=a.project, force=a.force)
+    except (ValueError, FileExistsError, OSError) as exc:
+        sys.exit(f"error: {exc}")
+    state = "installed" if changed else "already current"
+    print(f"Claude Code skill {state}: {path}")
+
+
+def cmd_plan(a):
+    from .planning import ClaudePlanner
+    task = _read(a.task)
+    try:
+        result = ClaudePlanner(timeout=a.timeout).plan(
+            task, a.workspace, model=a.model, effort=a.effort)
+    except (RuntimeError, ValueError) as exc:
+        sys.exit(f"error: {exc}")
+    if a.json:
+        print(json.dumps(result.to_dict()))
+    else:
+        print(f"[{result.status}] {result.summary}")
+        for step in result.steps:
+            print(f"{step['id']}: {step['objective']} [{step['acceptance']}]")
+        for risk in result.risks:
+            print("risk: " + risk, file=sys.stderr)
+        for question in result.questions:
+            print("question: " + question, file=sys.stderr)
+    sys.exit(0 if result.status == "planned" and result.returncode == 0 else 1)
+
+
+def cmd_install_codex(a):
+    from .codex_integration import install_codex_skill
+    try:
+        path, changed = install_codex_skill(force=a.force)
+    except (FileExistsError, OSError) as exc:
+        sys.exit(f"error: {exc}")
+    state = "installed" if changed else "already current"
+    print(f"Codex skill {state}: {path}")
+
+
 def main():
     p = argparse.ArgumentParser(prog="llmjury",
                                 description="Local verified answers. Don't vote, verify.")
@@ -241,6 +308,38 @@ def main():
     r.add_argument("--pace", type=float, default=0.0,
                    help="seconds to pause between problems (duty-cycle to keep the GPU cool)")
     r.set_defaults(func=cmd_reproduce)
+
+    d = sub.add_parser(
+        "delegate", help="run a bounded Claude-planned task through a workspace-confined Codex agent")
+    d.add_argument("--task", required=True, help="task brief file, or - to read it from stdin")
+    d.add_argument("--workspace", default=".", help="repository/workspace Codex may access")
+    d.add_argument("--model", help="Codex model override (default: Codex configuration)")
+    d.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh"])
+    d.add_argument("--sandbox", default="workspace-write", choices=["read-only", "workspace-write"])
+    d.add_argument("--add-dir", action="append", default=[],
+                   help="additional writable directory (repeatable; use sparingly)")
+    d.add_argument("--timeout", type=int, default=1800, help="execution timeout in seconds")
+    d.add_argument("--json", action="store_true", help="emit the structured Codex handoff as JSON")
+    d.set_defaults(func=cmd_delegate)
+
+    i = sub.add_parser("install-claude", help="install the LLM-Jury delegation skill for Claude Code")
+    i.add_argument("--scope", default="user", choices=["user", "project"])
+    i.add_argument("--project", help="project root for --scope project (default: current directory)")
+    i.add_argument("--force", action="store_true", help="replace a differing existing skill")
+    i.set_defaults(func=cmd_install_claude)
+
+    q = sub.add_parser("plan", help="ask Claude Code for a read-only structured execution plan")
+    q.add_argument("--task", required=True, help="task and current evidence file, or - for stdin")
+    q.add_argument("--workspace", default=".", help="repository Claude may inspect read-only")
+    q.add_argument("--model", help="Claude model override (default: Claude configuration)")
+    q.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+    q.add_argument("--timeout", type=int, default=900, help="planning timeout in seconds")
+    q.add_argument("--json", action="store_true", help="emit the structured Claude plan as JSON")
+    q.set_defaults(func=cmd_plan)
+
+    c = sub.add_parser("install-codex", help="install automatic Claude planning for Codex")
+    c.add_argument("--force", action="store_true", help="replace a differing existing skill")
+    c.set_defaults(func=cmd_install_codex)
 
     a = p.parse_args()
     a.func(a)

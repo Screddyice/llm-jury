@@ -7,6 +7,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import shutil  # noqa: E402
 import subprocess  # noqa: E402
+import json  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 from llmjury import verifiers  # noqa: E402
 from llmjury.verifiers import (  # noqa: E402
@@ -352,6 +355,180 @@ def test_engine_early_exit_does_not_wait_for_slow_samples():
     wall = time.time() - t
     assert r.verified and r.stage == "single"
     assert wall < 1.0, f"early exit waited for abandoned samples: {wall:.2f}s"
+
+
+def test_codex_delegator_uses_workspace_write_and_repo_rules():
+    from llmjury.delegation import CodexDelegator
+
+    calls = []
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw))
+        output = Path(cmd[cmd.index("--output-last-message") + 1])
+        output.write_text(json.dumps({
+            "status": "completed",
+            "summary": "Implemented the bounded change.",
+            "changed_files": ["llmjury/example.py"],
+            "tests": ["python tests/test_llmjury.py (pass)"],
+            "blockers": [],
+        }), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    with tempfile.TemporaryDirectory() as workspace:
+        result = CodexDelegator(runner=runner).delegate(
+            "Implement the parser and run its tests.", workspace, model="gpt-test")
+
+    cmd, kwargs = calls[0]
+    assert result.status == "completed" and result.returncode == 0
+    assert result.changed_files == ["llmjury/example.py"]
+    assert cmd[:3] == ["codex", "exec", "--ephemeral"]
+    assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
+    assert "--ignore-user-config" not in cmd and "--ignore-rules" not in cmd
+    assert "--output-schema" in cmd and "--output-last-message" in cmd
+    assert "shell_environment_policy.inherit=core" in cmd
+    assert "gpt-test" in cmd
+    assert kwargs["timeout"] == 1800
+    prompt = cmd[-1]
+    assert "Implement the parser" in prompt
+    assert "AGENTS.md" in prompt and "--backend ollama" in prompt
+
+
+def test_codex_delegator_reports_invalid_handoff_as_blocked():
+    from llmjury.delegation import CodexDelegator
+
+    def runner(cmd, **kw):
+        output = Path(cmd[cmd.index("--output-last-message") + 1])
+        output.write_text(json.dumps({
+            "status": "surprise", "summary": "invalid", "changed_files": [],
+            "tests": [], "blockers": [],
+        }), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 2, "", "authentication failed")
+
+    with tempfile.TemporaryDirectory() as workspace:
+        result = CodexDelegator(runner=runner).delegate("Do the thing", workspace)
+    assert result.status == "blocked" and result.returncode == 2
+    assert "authentication failed" in result.blockers[0]
+
+
+def test_codex_delegator_nonzero_exit_overrides_completed_handoff():
+    from llmjury.delegation import CodexDelegator
+
+    def runner(cmd, **kw):
+        output = Path(cmd[cmd.index("--output-last-message") + 1])
+        output.write_text(json.dumps({
+            "status": "completed", "summary": "claimed success", "changed_files": [],
+            "tests": [], "blockers": [],
+        }), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 3, "", "")
+
+    with tempfile.TemporaryDirectory() as workspace:
+        result = CodexDelegator(runner=runner).delegate("Do the thing", workspace)
+    assert result.status == "blocked" and result.returncode == 3
+    assert result.blockers == ["Codex exited with status 3."]
+
+
+def test_validate_handoff_requires_exact_typed_schema():
+    from llmjury.delegation import validate_handoff
+
+    valid = {
+        "status": "completed", "summary": "done", "changed_files": ["a.py"],
+        "tests": ["pytest (pass)"], "blockers": [],
+    }
+    assert validate_handoff(valid)
+    assert not validate_handoff({**valid, "status": "done"})
+    assert not validate_handoff({**valid, "changed_files": [1]})
+    assert not validate_handoff({**valid, "extra": True})
+    assert not validate_handoff(None)
+
+
+def test_install_claude_skill_is_idempotent_and_refuses_overwrite():
+    from llmjury.claude_integration import SKILL, install_claude_skill
+
+    with tempfile.TemporaryDirectory() as project:
+        path, changed = install_claude_skill("project", project)
+        assert changed and path.read_text(encoding="utf-8") == SKILL
+        same_path, changed = install_claude_skill("project", project)
+        assert same_path == path and not changed
+        path.write_text("custom skill", encoding="utf-8")
+        try:
+            install_claude_skill("project", project)
+            assert False, "a custom skill must not be overwritten without --force"
+        except FileExistsError:
+            pass
+        _, changed = install_claude_skill("project", project, force=True)
+        assert changed and path.read_text(encoding="utf-8") == SKILL
+
+
+def test_claude_planner_is_read_only_and_parses_structured_envelope():
+    from llmjury.planning import ClaudePlanner
+
+    calls = []
+    plan = {
+        "status": "planned", "summary": "Two bounded steps.",
+        "steps": [{
+            "id": "step-1", "objective": "Implement parser",
+            "acceptance": "focused tests pass", "files": ["parser.py"],
+        }],
+        "risks": ["Preserve compatibility"], "questions": [],
+    }
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw))
+        return subprocess.CompletedProcess(
+            cmd, 0, json.dumps({"type": "result", "structured_output": plan}), "")
+
+    with tempfile.TemporaryDirectory() as workspace:
+        result = ClaudePlanner(runner=runner).plan(
+            "Plan the parser change", workspace, model="claude-test")
+        expected_workspace = str(Path(workspace).resolve())
+
+    cmd, kwargs = calls[0]
+    assert result.status == "planned" and result.steps[0]["id"] == "step-1"
+    assert kwargs["cwd"] == expected_workspace and kwargs["timeout"] == 900
+    assert cmd[cmd.index("--permission-mode") + 1] == "plan"
+    assert cmd[cmd.index("--tools") + 1] == "Read,Glob,Grep"
+    assert "--json-schema" in cmd and "--no-session-persistence" in cmd
+    assert "claude-test" in cmd and "dynamically replan" in cmd[-1]
+
+
+def test_validate_plan_rejects_malformed_steps():
+    from llmjury.planning import validate_plan
+
+    valid = {
+        "status": "planned", "summary": "ok",
+        "steps": [{"id": "1", "objective": "do", "acceptance": "pass", "files": []}],
+        "risks": [], "questions": [],
+    }
+    assert validate_plan(valid)
+    assert not validate_plan({**valid, "status": "done"})
+    assert not validate_plan({**valid, "steps": [{"id": "1"}]})
+    assert not validate_plan({**valid, "risks": [1]})
+
+
+def test_install_codex_skill_is_idempotent_and_refuses_overwrite():
+    from llmjury.codex_integration import SKILL, install_codex_skill
+
+    old_home = os.environ.get("CODEX_HOME")
+    with tempfile.TemporaryDirectory() as codex_home:
+        os.environ["CODEX_HOME"] = codex_home
+        try:
+            path, changed = install_codex_skill()
+            assert changed and path.read_text(encoding="utf-8") == SKILL
+            same_path, changed = install_codex_skill()
+            assert same_path == path and not changed
+            path.write_text("custom skill", encoding="utf-8")
+            try:
+                install_codex_skill()
+                assert False, "a custom skill must not be overwritten without --force"
+            except FileExistsError:
+                pass
+            _, changed = install_codex_skill(force=True)
+            assert changed and path.read_text(encoding="utf-8") == SKILL
+        finally:
+            if old_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = old_home
 
 
 if __name__ == "__main__":

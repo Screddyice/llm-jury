@@ -3,9 +3,15 @@
 LLM-Jury **executes model-generated code** to verify it — that is the core mechanism, and it is
 inherently dangerous. Read this before pointing it at anything you don't trust.
 
-## What v0.1 does to contain execution
+## What v0.1 does to contain verification
 
-Each candidate runs in a subprocess with:
+By default (`LLMJURY_SANDBOX=auto`), each candidate runs in a throwaway container
+with no network, dropped capabilities, a non-root user, memory/CPU/process limits,
+and a read-only root filesystem. If Docker or Colima cannot be provisioned, auto mode
+prints a warning and uses the hardened host runner. Set `LLMJURY_SANDBOX=docker` to
+require the container instead of allowing that fallback.
+
+The hardened host runner uses:
 
 - a **scrubbed environment** — none of the parent's secrets/API keys are inherited, and `HOME` is
   repointed into a throwaway temp directory,
@@ -16,14 +22,33 @@ Each candidate runs in a subprocess with:
 
 It also **refuses to run as root** unless you set `LLMJURY_ALLOW_ROOT=1`.
 
-## What v0.1 is NOT
+## What the host fallback is NOT
 
-This is **not a real sandbox.** No containers, namespaces, seccomp, or VM. The network is not
-blocked, and memory is not hard-capped (a reliable `RLIMIT_AS` is fragile on macOS). A determined
-adversary controlling the model output, the task, or the tests can likely still do harm.
+The host fallback is **not a real sandbox.** It has no namespaces, seccomp, or VM; the network is
+not blocked, and memory is not hard-capped (a reliable `RLIMIT_AS` is fragile on macOS). A
+determined adversary controlling the model output, the task, or the tests can likely still do harm.
 
 **For untrusted input, run LLM-Jury inside a container or a VM.** Don't run it as root, and don't run
 it on a machine holding secrets you can't afford to expose.
+
+## Delegated repository execution
+
+`llmjury delegate` intentionally has a different trust boundary from candidate
+verification. It launches an authenticated Codex agent with `workspace-write` access
+to the directory selected by the caller. That agent can read and modify files in the
+workspace and run commands there. Use it only in repositories you trust and inspect
+the resulting diff.
+
+The delegation command does not expose Codex's danger-full-access or approval-bypass
+modes. It runs ephemerally, keeps repository instructions enabled, requests Codex's
+minimal `core` shell environment, and requires explicit `--add-dir` flags for any
+additional writable directory. These controls reduce scope; they do not make an
+untrusted task or repository safe. Never include secrets in a delegated task brief.
+
+`llmjury plan` gives Claude Code only `Read`, `Glob`, and `Grep` tools in plan
+permission mode, runs without session persistence, and does not grant Bash or edit
+tools. It can still read the selected repository, so use it only with workspaces and
+task briefs that the configured Claude account is allowed to inspect.
 
 ## Reporting a vulnerability
 
