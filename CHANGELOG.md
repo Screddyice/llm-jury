@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `llmjury delegate` for Claude-planned, workspace-confined Codex execution with
+  schema-validated handoffs and minimal shell-environment inheritance.
+- Add `llmjury install-claude` to install an idempotent Claude Code delegation skill
+  that keeps local Ollama assistance limited to verifier-backed code units.
+- Add `llmjury plan` and `llmjury install-codex` so Codex automatically delegates
+  non-trivial planning and evidence-driven replanning to read-only Claude Code.
 - Add an authenticated Codex CLI backend for direct generation or frontier escalation.
 - Add `--frontier-backend` so Codex and OpenRouter are explicit, interchangeable
   frontier providers instead of coupling escalation to OpenRouter.

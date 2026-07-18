@@ -6,7 +6,7 @@
 [![dependencies](https://img.shields.io/badge/dependencies-0-success)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Quickstart](#quickstart) · [Codex Fusion](#codex-fusion) · [How it works](#how-it-works) · [Benchmarks](#benchmarks) · [Write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb) · [Paper →](https://app.notion.com/p/3874834c4d78817f99a0fc26088ed7e4)
+[Quickstart](#quickstart) · [Claude ↔ Codex](#bidirectional-claude--codex-orchestration) · [Codex Fusion](#codex-fusion) · [How it works](#how-it-works) · [Benchmarks](#benchmarks) · [Write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb) · [Paper →](https://app.notion.com/p/3874834c4d78817f99a0fc26088ed7e4)
 
 **Local verified answers. Don't vote, verify.**
 
@@ -104,6 +104,86 @@ verifier = FunctionalCodeVerifier.from_cases("add", [((2, 3), 5), ((-1, 1), 0)])
 
 (`--tests` also accepts either a full `def check(candidate): ...` or just its body. And
 `llmjury solve --json` emits a machine-readable result for piping into CI/agents.)
+
+## Bidirectional Claude ↔ Codex orchestration
+
+LLM-Jury installs skills into both agent harnesses so the workflow works from either
+side: Claude plans and reviews; authenticated Codex executes; the local Ollama council
+assists only on code units with a trustworthy oracle.
+
+```bash
+llmjury install-claude
+llmjury install-codex
+```
+
+Restart Claude Code and Codex after the first install so each discovers its skill.
+
+```text
+Start in Claude:  Claude plan → Codex execute ─┐
+                                               ├→ tests/diff → done
+Start in Codex:   Claude plan ← Codex request ─┘       │
+                         ↑                              │ evidence changed
+                         └──────── dynamic replan ──────┘
+
+Within Codex execution: testable Python unit → local Ollama jury → verifier → integrate
+```
+
+### Starting in Claude Code
+
+The `llm-jury-delegate` skill has Claude pass a bounded execution brief to Codex:
+
+```bash
+llmjury delegate --workspace "$PWD" --task - --json <<'TASK'
+Implement the parser described in the current plan.
+
+Scope: src/parser.py and tests/test_parser.py.
+Acceptance: preserve the public API and make the focused parser tests pass.
+Checks: python -m pytest tests/test_parser.py.
+TASK
+```
+
+### Starting in Codex
+
+The `llm-jury-orchestrate` skill automatically asks Claude to plan non-trivial
+implementation work before Codex edits. Trivial one-step changes and explicit
+“just execute” requests skip the extra planning call. The underlying command is:
+
+```bash
+llmjury plan --workspace "$PWD" --task - --json <<'TASK'
+Implement resumable uploads without changing the public client API.
+Include relevant repository constraints, acceptance criteria, and checks.
+TASK
+```
+
+Claude runs with only read/search tools in plan permission mode and returns
+schema-validated steps, file targets, acceptance criteria, risks, and blocking
+questions. Codex executes those steps. If tests reveal a wrong assumption, the code
+differs materially from the plan, scope must change, or repeated focused attempts
+fail, Codex calls `llmjury plan` again with the original goal plus current evidence.
+Claude returns only the remaining or corrective work, preserving already verified
+progress.
+
+`delegate` is a different security mode from the Codex generation backend:
+
+- It runs an ephemeral Codex agent with `workspace-write` confinement in the one
+  workspace Claude names.
+- It keeps Codex user configuration and repository instructions enabled, so the
+  executor reads the applicable `AGENTS.md` and `CLAUDE.md`.
+- Shell commands receive Codex's minimal `core` environment by default instead of
+  inheriting the caller's credential-rich environment.
+- Codex returns a schema-validated handoff: status, summary, changed files, checks,
+  and blockers. Claude remains responsible for inspecting the diff and final result.
+- Destructive operations and permission bypasses are not exposed. Extra writable
+  directories require an explicit repeatable `--add-dir` argument.
+
+The delegation prompt allows Codex to call the existing local jury for an extractable
+Python unit with functional tests or stdin/stdout cases. It does not ask local models
+to vote on architecture or other uncheckable work. This preserves the project's core
+rule: local model output becomes implementation input only after an independent
+verifier accepts it.
+
+Use `--scope project` to install the Claude skill in only the current repository, or
+`--force` to replace a locally modified installed copy. Both installers are idempotent.
 
 ## Codex Fusion
 
@@ -245,8 +325,9 @@ figures are the larger full runs from the write-up.)
 ## Status
 
 `v0.1` — working engine, functional and stdin/stdout verifiers, auto-provisioned container
-sandbox, Codex + Ollama + OpenRouter backends, verifier-gated frontier ladders, and
-`llmjury reproduce`. Next: more verifier types and benchmark runs for adaptive routing policies.
+sandbox, Codex + Ollama + OpenRouter backends, verifier-gated frontier ladders,
+bidirectional Claude/Codex orchestration, and `llmjury reproduce`. Next: more verifier
+types and benchmark runs for adaptive routing policies.
 
 ## License
 

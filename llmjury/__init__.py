@@ -7,6 +7,8 @@ from .engine import Engine, Result, solve
 from .verifiers import FunctionalCodeVerifier, StdioCodeVerifier, extract_code
 from .backends import CodexBackend, OpenRouterBackend, OllamaBackend, DemoBackend
 from .panels import CODEX_PANEL, CODEX_BEST, CLOUD_PANEL, CLOUD_BEST, LOCAL_PANEL, LOCAL_BEST
+from .delegation import CodexDelegator, DelegationResult
+from .planning import ClaudePlanner, PlanResult
 
 __version__ = "0.1.0"
 __all__ = [
@@ -15,4 +17,6 @@ __all__ = [
     "CodexBackend", "OpenRouterBackend", "OllamaBackend", "DemoBackend",
     "CODEX_PANEL", "CODEX_BEST",
     "CLOUD_PANEL", "CLOUD_BEST", "LOCAL_PANEL", "LOCAL_BEST",
+    "CodexDelegator", "DelegationResult",
+    "ClaudePlanner", "PlanResult",
 ]
