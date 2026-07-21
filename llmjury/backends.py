@@ -261,6 +261,49 @@ class OllamaBackend(Backend):
         return ""
 
 
+BAKED_SYSTEM_WARN_CHARS = 2000
+
+
+def show_system_chars(host, model, timeout=5):
+    """Length of the SYSTEM prompt baked into an Ollama tag's Modelfile.
+
+    Returns None when the tag or the server can't be probed; callers treat
+    that as unknown (no warning) — a real failure surfaces on the solve call.
+    """
+    body = json.dumps({"model": model}).encode()
+    try:
+        req = urllib.request.Request(
+            host.rstrip("/") + "/api/show", data=body,
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.load(r)
+        return len(d.get("system") or "")
+    except Exception:
+        return None
+
+
+def baked_system_warnings(models, chars_of):
+    """One warning per distinct tag whose Modelfile bakes a big SYSTEM prompt.
+
+    Jury prompts are bare user messages at a lean num_ctx. A large baked
+    system prompt is prefilled on every call and then truncated away, which
+    silently degrades answers or hangs the stage on prefill (measured live:
+    186 KB harness prompts baked into local qwen3.5 tags — a "Reply OK" probe
+    timed out at 120 s on one such 12B tag). The council must be pristine tags.
+    """
+    msgs = []
+    for m in dict.fromkeys(models):
+        n = chars_of(m)
+        if n and n > BAKED_SYSTEM_WARN_CHARS:
+            msgs.append(
+                f"[llmjury] warning: {m} has a {round(n / 1024)} KB SYSTEM prompt baked "
+                "into its Modelfile — jury prompts are bare user messages at a lean "
+                "num_ctx, so the baked system slows every prefill and gets truncated "
+                "(degrading or hanging the run); prefer a pristine tag with no baked "
+                "SYSTEM.")
+    return msgs
+
+
 class OpenAICompatBackend(Backend):
     """A generic OpenAI-compatible /chat/completions endpoint.
 

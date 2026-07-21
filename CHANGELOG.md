@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `solve --backend ollama` now preflights the panel with Ollama `/api/show` and warns
+  when a tag has a large SYSTEM prompt baked into its Modelfile: jury prompts are bare
+  user messages at a lean num_ctx, so a baked system slows every prefill and gets
+  truncated — measured live, 186 KB baked prompts made one 12B tag time out a
+  50-token probe. The warning names the tag and size; the run still proceeds.
 - `llmjury install-claude` now also installs a router-independent `llm-jury-fusion`
   Claude Code agent. It carries no `model:` pin, so fusion runs work in sessions that
   pin the official Anthropic API (the Claude desktop app's hosted sessions, cron)
