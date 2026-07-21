@@ -214,14 +214,14 @@ def cmd_delegate(a):
 
 
 def cmd_install_claude(a):
-    from .claude_integration import install_claude_skill
+    from .claude_integration import install_claude_agent, install_claude_skill
     try:
-        path, changed = install_claude_skill(
-            scope=a.scope, project=a.project, force=a.force)
+        for kind, install in (("skill", install_claude_skill), ("agent", install_claude_agent)):
+            path, changed = install(scope=a.scope, project=a.project, force=a.force)
+            state = "installed" if changed else "already current"
+            print(f"Claude Code {kind} {state}: {path}")
     except (ValueError, FileExistsError, OSError) as exc:
         sys.exit(f"error: {exc}")
-    state = "installed" if changed else "already current"
-    print(f"Claude Code skill {state}: {path}")
 
 
 def cmd_plan(a):
@@ -322,10 +322,12 @@ def main():
     d.add_argument("--json", action="store_true", help="emit the structured Codex handoff as JSON")
     d.set_defaults(func=cmd_delegate)
 
-    i = sub.add_parser("install-claude", help="install the LLM-Jury delegation skill for Claude Code")
+    i = sub.add_parser(
+        "install-claude",
+        help="install the LLM-Jury skill and fusion agent for Claude Code")
     i.add_argument("--scope", default="user", choices=["user", "project"])
     i.add_argument("--project", help="project root for --scope project (default: current directory)")
-    i.add_argument("--force", action="store_true", help="replace a differing existing skill")
+    i.add_argument("--force", action="store_true", help="replace a differing existing skill/agent")
     i.set_defaults(func=cmd_install_claude)
 
     q = sub.add_parser("plan", help="ask Claude Code for a read-only structured execution plan")

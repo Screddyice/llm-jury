@@ -1,4 +1,4 @@
-"""Install the Claude Code skill that exposes LLM-Jury delegation."""
+"""Install the Claude Code skill and agent that expose LLM-Jury."""
 from __future__ import annotations
 
 import os
@@ -41,27 +41,80 @@ and the repository instructions.
 """
 
 
+AGENT = """\
+---
+name: llm-jury-fusion
+description: Produces a COUNCIL-VERIFIED answer to a verifiable coding subtask by driving `llmjury solve` (local Ollama council, real verifier, optional frontier escalation) through Bash. Inherits the session model, so it works in every Claude Code session type — terminal, desktop app, cron — with no dependency on a local model router or custom base URL. Use ONLY when the task admits a mechanical oracle: a function with defined input→output, an algorithmic problem, or a bugfix a test reproduces. NOT for design, refactors, exploration, or prose — without a checkable answer the jury adds nothing.
+tools: Read, Write, Edit, Glob, Grep, Bash
+---
+
+You are the LLM-Jury fusion orchestrator. Your product is a VERIFIED answer,
+never a guess: the llm-jury council generates candidates and a real verifier —
+not a vote — decides what survives. "Don't vote, verify."
+
+## Preflight (every run)
+
+1. `llmjury --version` — if missing, stop and report: `pipx install llm-jury-verify`.
+2. `curl -sf -m 2 http://localhost:11434/api/version` — if Ollama is down, stop
+   and report it.
+3. `ollama list` must show `phi4`, `gemma3:12b`, and `llama3.1:8b`. If any tag is
+   missing, stop and report exactly which to `ollama pull` — never run a silently
+   degraded single-lab council.
+
+## Procedure
+
+1. **Confirm the oracle.** The task must reduce to an input→output contract you
+   can check mechanically. If it does not, stop and say so plainly — do not
+   fabricate a weak oracle; a bad oracle verifies bad code.
+2. **Frame it.** In a temporary directory, write the problem statement to a task
+   file and the oracle to `--tests` (pytest file), `--cases` (JSON cases), or
+   `--entry-point` (function-call cases), whichever fits the contract.
+3. **Run the jury.**
+
+       llmjury solve --task TASK_FILE [--tests F | --cases F.json] \\
+           [--entry-point NAME] --backend ollama --frontier auto
+
+   Omit `--frontier auto` when the user asked to stay local/offline.
+4. **Report honestly.** On success, return the verified code verbatim plus the
+   `stage / model / attempts` line. On failure, report the verifier output as a
+   failure — never hand-write a "fixed" answer and present it as verified.
+"""
+
+
 def skill_path(scope="user", project=None):
+    return _config_root(scope, project) / "skills" / "llm-jury-delegate" / "SKILL.md"
+
+
+def agent_path(scope="user", project=None):
+    return _config_root(scope, project) / "agents" / "llm-jury-fusion.md"
+
+
+def _config_root(scope, project):
     if scope == "user":
-        root = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
-    elif scope == "project":
-        root = Path(project or os.getcwd()).expanduser().resolve() / ".claude"
-    else:
-        raise ValueError("scope must be user or project")
-    return root / "skills" / "llm-jury-delegate" / "SKILL.md"
+        return Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
+    if scope == "project":
+        return Path(project or os.getcwd()).expanduser().resolve() / ".claude"
+    raise ValueError("scope must be user or project")
 
 
 def install_claude_skill(scope="user", project=None, force=False):
-    destination = skill_path(scope, project)
+    return _install(skill_path(scope, project), SKILL, force)
+
+
+def install_claude_agent(scope="user", project=None, force=False):
+    return _install(agent_path(scope, project), AGENT, force)
+
+
+def _install(destination, content, force):
     if destination.exists():
         current = destination.read_text(encoding="utf-8")
-        if current == SKILL:
+        if current == content:
             return destination, False
         if not force:
             raise FileExistsError(
                 f"{destination} already exists with different content; pass --force to replace it")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(".tmp")
-    temporary.write_text(SKILL, encoding="utf-8")
+    temporary.write_text(content, encoding="utf-8")
     temporary.replace(destination)
     return destination, True

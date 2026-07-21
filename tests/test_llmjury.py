@@ -459,6 +459,32 @@ def test_install_claude_skill_is_idempotent_and_refuses_overwrite():
         assert changed and path.read_text(encoding="utf-8") == SKILL
 
 
+def test_install_claude_fusion_agent_is_router_independent():
+    from llmjury.claude_integration import AGENT, install_claude_agent
+
+    with tempfile.TemporaryDirectory() as project:
+        path, changed = install_claude_agent("project", project)
+        assert changed and path.read_text(encoding="utf-8") == AGENT
+        assert path.name == "llm-jury-fusion.md"
+        assert path.parent.name == "agents"
+        frontmatter = AGENT.split("---")[1]
+        assert "name: llm-jury-fusion" in frontmatter
+        assert "model:" not in frontmatter, \
+            "a model pin would break sessions without a local router (Claude desktop app)"
+        assert "llmjury solve" in AGENT
+        assert "--backend ollama" in AGENT
+        same_path, changed = install_claude_agent("project", project)
+        assert same_path == path and not changed
+        path.write_text("custom agent", encoding="utf-8")
+        try:
+            install_claude_agent("project", project)
+            assert False, "a custom agent must not be overwritten without --force"
+        except FileExistsError:
+            pass
+        _, changed = install_claude_agent("project", project, force=True)
+        assert changed and path.read_text(encoding="utf-8") == AGENT
+
+
 def test_claude_planner_is_read_only_and_parses_structured_envelope():
     from llmjury.planning import ClaudePlanner
 

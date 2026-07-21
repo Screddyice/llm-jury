@@ -130,7 +130,16 @@ Within Codex execution: testable Python unit → local Ollama jury → verifier 
 
 ### Starting in Claude Code
 
-The `llm-jury-delegate` skill has Claude pass a bounded execution brief to Codex:
+`install-claude` installs two entry points:
+
+- **`llm-jury-fusion` agent** — a subagent that frames a verifiable task, derives the
+  oracle, and drives `llmjury solve --backend ollama` itself. It deliberately carries
+  no `model:` pin, so it inherits the session model and works in every Claude Code
+  session type — terminal, the Claude desktop app's hosted sessions, and cron — with
+  no dependency on a local model router or a custom `ANTHROPIC_BASE_URL`. (Sessions
+  pinned to the official API, like the desktop app's, cannot resolve local-router
+  model names; an unpinned agent sidesteps that entirely.)
+- **`llm-jury-delegate` skill** — has Claude pass a bounded execution brief to Codex:
 
 ```bash
 llmjury delegate --workspace "$PWD" --task - --json <<'TASK'
