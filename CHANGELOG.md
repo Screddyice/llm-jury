@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `llmjury install-claude` now also installs a router-independent `llm-jury-fusion`
+  Claude Code agent. It carries no `model:` pin, so fusion runs work in sessions that
+  pin the official Anthropic API (the Claude desktop app's hosted sessions, cron)
+  where local-router model names cannot resolve; the council still runs on local
+  Ollama either way.
+
 - Add `llmjury delegate` for Claude-planned, workspace-confined Codex execution with
   schema-validated handoffs and minimal shell-environment inheritance.
 - Add `llmjury install-claude` to install an idempotent Claude Code delegation skill
