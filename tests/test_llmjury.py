@@ -192,6 +192,68 @@ def test_demo_backend_escalates_and_verifies():
     assert r.verified and r.stage == "council" and r.model == "demo-council"
 
 
+def test_ollama_backend_disables_thinking_by_default():
+    from unittest.mock import patch
+    from llmjury.backends import OllamaBackend
+
+    requests = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return b'{"message":{"content":"answer"}}'
+
+    def urlopen(request, timeout):
+        requests.append((request, timeout))
+        return Response()
+
+    with patch("llmjury.backends.urllib.request.urlopen", side_effect=urlopen):
+        assert OllamaBackend().complete("qwen3:8b", "solve", n=1) == ["answer"]
+
+    body = json.loads(requests[0][0].data)
+    assert body["think"] is False
+
+
+def test_ollama_cache_separates_thinking_modes():
+    from unittest.mock import patch
+    from llmjury.backends import OllamaBackend
+
+    calls = []
+
+    class Response:
+        def __init__(self, content):
+            self.content = content
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return json.dumps({"message": {"content": self.content}}).encode()
+
+    def urlopen(request, timeout):
+        body = json.loads(request.data)
+        calls.append(body)
+        return Response("reasoned" if body["think"] else "direct")
+
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("llmjury.backends.urllib.request.urlopen", side_effect=urlopen):
+        cache = str(Path(tmp) / "responses.jsonl")
+        direct = OllamaBackend(cache_path=cache, think=False)
+        assert direct.complete("qwen3:8b", "solve", n=1) == ["direct"]
+        reasoned = OllamaBackend(cache_path=cache, think=True)
+        assert reasoned.complete("qwen3:8b", "solve", n=1) == ["reasoned"]
+
+    assert len(calls) == 2
+
+
 def test_codex_backend_runs_ephemeral_read_only_generation():
     from llmjury.backends import CodexBackend
 
@@ -221,6 +283,13 @@ def test_cli_backend_builds_codex_provider():
 
     with patch("llmjury.backends.shutil.which", return_value="/usr/local/bin/codex"):
         assert _backend("codex").name == "codex"
+
+
+def test_cli_backend_can_enable_ollama_thinking():
+    from llmjury.cli import _backend
+
+    backend = _backend("ollama", think=True)
+    assert backend.think is True
 
 
 def test_cli_auto_frontier_resolves_open_source_ladder():

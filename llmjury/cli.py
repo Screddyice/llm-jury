@@ -26,10 +26,10 @@ def _read(path):
         sys.exit(f"error: cannot read {path}: {e}")
 
 
-def _backend(name, num_ctx=None):
+def _backend(name, num_ctx=None, think=False):
     if name == "ollama":
         from .backends import OllamaBackend
-        return OllamaBackend(cache_path=CACHE, num_ctx=num_ctx or None)
+        return OllamaBackend(cache_path=CACHE, num_ctx=num_ctx or None, think=think)
     if name == "codex":
         from .backends import CodexBackend
         return CodexBackend(cache_path=CACHE)
@@ -114,7 +114,7 @@ def cmd_solve(a):
     else:
         sys.exit("error: provide --tests (functional check) or --cases (stdin/stdout JSON)")
 
-    backend = _backend(a.backend, num_ctx=a.num_ctx)
+    backend = _backend(a.backend, num_ctx=a.num_ctx, think=a.think)
     panel = a.models.split(",") if a.models else None
     route = {}
     if a.brain:
@@ -279,6 +279,9 @@ def main():
                    "0 = the server's default). Ollama sizes each model's KV cache as "
                    "num_ctx x OLLAMA_NUM_PARALLEL at load, so a lean value here is what "
                    "lets the whole council decode in parallel without evictions")
+    s.add_argument("--think", action="store_true",
+                   help="let thinking-capable Ollama models spend tokens on reasoning; "
+                   "disabled by default so the verifier receives answer code")
     s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")

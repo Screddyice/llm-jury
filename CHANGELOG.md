@@ -16,6 +16,9 @@
 - Add `--frontier auto`, a verifier-gated OpenRouter ladder that tries open-weight
   DeepSeek V4 Flash before the benchmark-backed V4 Pro accuracy tier.
 - Allow ordered frontier ladders in `Engine` while preserving single-model callers.
+- Disable Ollama thinking by default so Qwen and other reasoning models return code
+  within the generation budget. Add `solve --think` for opt-in reasoning, and isolate
+  cached responses by Ollama host, context size, and thinking mode.
 
 Notable changes to LLM-Jury. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions follow [SemVer](https://semver.org/).

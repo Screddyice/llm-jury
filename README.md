@@ -293,6 +293,11 @@ read as a separately measured benchmark result until that exact policy is reprod
   ```bash
   ollama pull phi4 && ollama pull gemma3:12b && ollama pull llama3.1:8b
   ```
+  Pass any Ollama completion tag through `--models`, including Qwen, custom
+  Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
+  generation budget produces verifier-ready code. Add `--think` when you want an
+  Ollama model to spend part of that budget on reasoning. The cache keeps thinking
+  and non-thinking runs separate.
 - **OpenRouter (cloud)** — `--backend openrouter` (default). Set `OPENROUTER_API_KEY`.
 - **Codex CLI (authenticated OpenAI provider)** — `--backend codex`, or use
   `--frontier-backend codex` after a local council. It runs ephemeral, read-only
@@ -318,6 +323,11 @@ slug instead when reproducing a historical benchmark or testing a specific model
 A diverse, cross-lineage panel (different labs → different mistakes) is the point. The defaults
 are Phi-4 (Microsoft) + Gemma-3-12B (Google) + Llama-3.1-8B (Meta); swap your own in
 `llmjury.panels` or by passing `panel=[...]` to `Engine`.
+
+```bash
+llmjury solve --task task.txt --tests tests.py --entry-point solve \
+  --backend ollama --models qwen3:8b,qwen3.5:4b,gemma3:12b --best qwen3.5:4b
+```
 
 ## Reproduce the benchmarks
 
