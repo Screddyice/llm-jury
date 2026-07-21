@@ -9,3 +9,10 @@ build/
 *.log
 .venv/
 venv/
+# Claude Harness - Ephemeral/Per-Session State
+.claude-harness/sessions/
+.claude-harness/memory/compaction-backups/
+.claude-harness/memory/working/
+
+# Claude Code - Local settings
+.claude/settings.local.json
