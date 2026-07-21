@@ -516,6 +516,9 @@ def test_install_codex_skill_is_idempotent_and_refuses_overwrite():
             assert changed and path.read_text(encoding="utf-8") == SKILL
             same_path, changed = install_codex_skill()
             assert same_path == path and not changed
+            path.write_text(SKILL.replace("version: 2", "version: 1"), encoding="utf-8")
+            _, changed = install_codex_skill()
+            assert changed and path.read_text(encoding="utf-8") == SKILL
             path.write_text("custom skill", encoding="utf-8")
             try:
                 install_codex_skill()
@@ -529,6 +532,17 @@ def test_install_codex_skill_is_idempotent_and_refuses_overwrite():
                 os.environ.pop("CODEX_HOME", None)
             else:
                 os.environ["CODEX_HOME"] = old_home
+
+
+def test_codex_skill_drives_verified_native_app_workflow():
+    from llmjury.codex_integration import SKILL
+
+    assert "Codex app" in SKILL
+    assert "llmjury solve --task" in SKILL
+    assert "--backend ollama" in SKILL
+    assert '"verified": true' in SKILL
+    assert "Do not integrate" in SKILL
+    assert "llmjury plan" in SKILL
 
 
 if __name__ == "__main__":
