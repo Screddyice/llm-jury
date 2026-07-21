@@ -441,6 +441,23 @@ def test_validate_handoff_requires_exact_typed_schema():
     assert not validate_handoff(None)
 
 
+def test_baked_system_warnings_flag_contaminated_tags():
+    from llmjury.backends import baked_system_warnings
+
+    sizes = {"phi4": 0, "gemma3:12b-fable": 186191, "tiny-persona": 1500}
+    msgs = baked_system_warnings(list(sizes), sizes.get)
+    # only the tag over the threshold is flagged, and the message is actionable
+    assert len(msgs) == 1
+    assert "gemma3:12b-fable" in msgs[0]
+    assert "182 KB" in msgs[0]
+    assert "pristine" in msgs[0]
+    # a probe failure (None) must not produce a false warning
+    assert baked_system_warnings(["phi4"], lambda m: None) == []
+    # duplicates are reported once
+    assert len(baked_system_warnings(
+        ["fat", "fat"], lambda m: 50_000)) == 1
+
+
 def test_install_claude_skill_is_idempotent_and_refuses_overwrite():
     from llmjury.claude_integration import SKILL, install_claude_skill
 

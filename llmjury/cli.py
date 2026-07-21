@@ -143,6 +143,19 @@ def cmd_solve(a):
     fb = None
     if frontier:
         fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
+    if backend.name == "ollama":
+        # Preflight: flag panel tags with a baked SYSTEM prompt before spending
+        # minutes prefilling one (see baked_system_warnings for the field data).
+        from .backends import baked_system_warnings, show_system_chars
+        probe = panel
+        if probe is None:
+            from .panels import default_panel
+            probe_best, probe_panel = default_panel(backend.name)
+            probe = [probe_best] + list(probe_panel)
+        probe = ([best] if best else []) + [m for m in probe if m not in route]
+        for warning in baked_system_warnings(
+                probe, lambda m: show_system_chars(backend.host, m)):
+            sys.stderr.write(warning + "\n")
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,

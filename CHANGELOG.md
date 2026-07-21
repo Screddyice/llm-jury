@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `solve --backend ollama` now preflights the panel with Ollama `/api/show` and warns
+  when a tag has a large SYSTEM prompt baked into its Modelfile: jury prompts are bare
+  user messages at a lean num_ctx, so a baked system slows every prefill and gets
+  truncated — measured live, 186 KB baked prompts made one 12B tag time out a
+  50-token probe. The warning names the tag and size; the run still proceeds.
+
 - Add `llmjury delegate` for Claude-planned, workspace-confined Codex execution with
   schema-validated handoffs and minimal shell-environment inheritance.
 - Add `llmjury install-claude` to install an idempotent Claude Code delegation skill
