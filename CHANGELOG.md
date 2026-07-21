@@ -7,6 +7,11 @@
   user messages at a lean num_ctx, so a baked system slows every prefill and gets
   truncated — measured live, 186 KB baked prompts made one 12B tag time out a
   50-token probe. The warning names the tag and size; the run still proceeds.
+- `llmjury install-claude` now also installs a router-independent `llm-jury-fusion`
+  Claude Code agent. It carries no `model:` pin, so fusion runs work in sessions that
+  pin the official Anthropic API (the Claude desktop app's hosted sessions, cron)
+  where local-router model names cannot resolve; the council still runs on local
+  Ollama either way.
 
 - Add `llmjury delegate` for Claude-planned, workspace-confined Codex execution with
   schema-validated handoffs and minimal shell-environment inheritance.
@@ -22,6 +27,9 @@
 - Add `--frontier auto`, a verifier-gated OpenRouter ladder that tries open-weight
   DeepSeek V4 Flash before the benchmark-backed V4 Pro accuracy tier.
 - Allow ordered frontier ladders in `Engine` while preserving single-model callers.
+- Disable Ollama thinking by default so Qwen and other reasoning models return code
+  within the generation budget. Add `solve --think` for opt-in reasoning, and isolate
+  cached responses by Ollama host, context size, and thinking mode.
 
 Notable changes to LLM-Jury. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions follow [SemVer](https://semver.org/).

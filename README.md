@@ -130,7 +130,16 @@ Within Codex execution: testable Python unit → local Ollama jury → verifier 
 
 ### Starting in Claude Code
 
-The `llm-jury-delegate` skill has Claude pass a bounded execution brief to Codex:
+`install-claude` installs two entry points:
+
+- **`llm-jury-fusion` agent** — a subagent that frames a verifiable task, derives the
+  oracle, and drives `llmjury solve --backend ollama` itself. It deliberately carries
+  no `model:` pin, so it inherits the session model and works in every Claude Code
+  session type — terminal, the Claude desktop app's hosted sessions, and cron — with
+  no dependency on a local model router or a custom `ANTHROPIC_BASE_URL`. (Sessions
+  pinned to the official API, like the desktop app's, cannot resolve local-router
+  model names; an unpinned agent sidesteps that entirely.)
+- **`llm-jury-delegate` skill** — has Claude pass a bounded execution brief to Codex:
 
 ```bash
 llmjury delegate --workspace "$PWD" --task - --json <<'TASK'
@@ -144,24 +153,34 @@ TASK
 
 ### Starting in Codex
 
-The `llm-jury-orchestrate` skill automatically asks Claude to plan non-trivial
-implementation work before Codex edits. Trivial one-step changes and explicit
-“just execute” requests skip the extra planning call. The underlying command is:
+The `llm-jury-orchestrate` skill gives the Codex app a native jury workflow. Codex
+extracts a code unit and its oracle, runs the local Ollama council through the app's
+terminal tool, and accepts a candidate only when the JSON result contains
+`"verified": true`.
+
+```bash
+llmjury solve --task task.txt --tests tests.py --entry-point solve \
+    --backend ollama --frontier auto --json
+```
+
+The skill keeps private runs local when the user requests them or OpenRouter has no
+credential. Codex runs the repository's tests after it applies a verified candidate.
+It does not send prose, architecture, UI judgment, or code without a trustworthy
+oracle to the jury.
+
+Claude planning remains available for work that needs a separate plan:
 
 ```bash
 llmjury plan --workspace "$PWD" --task - --json <<'TASK'
 Implement resumable uploads without changing the public client API.
-Include relevant repository constraints, acceptance criteria, and checks.
+Include repository constraints, acceptance criteria, and checks.
 TASK
 ```
 
-Claude runs with only read/search tools in plan permission mode and returns
-schema-validated steps, file targets, acceptance criteria, risks, and blocking
-questions. Codex executes those steps. If tests reveal a wrong assumption, the code
-differs materially from the plan, scope must change, or repeated focused attempts
-fail, Codex calls `llmjury plan` again with the original goal plus current evidence.
-Claude returns only the remaining or corrective work, preserving already verified
-progress.
+Claude receives read and search tools in plan permission mode and returns structured
+steps, risks, and blocking questions. Planning does not run before each jury call.
+Codex invokes it when the user requests a plan or execution evidence invalidates the
+current one.
 
 `delegate` is a different security mode from the Codex generation backend:
 
@@ -283,6 +302,11 @@ read as a separately measured benchmark result until that exact policy is reprod
   ```bash
   ollama pull phi4 && ollama pull gemma3:12b && ollama pull llama3.1:8b
   ```
+  Pass any Ollama completion tag through `--models`, including Qwen, custom
+  Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
+  generation budget produces verifier-ready code. Add `--think` when you want an
+  Ollama model to spend part of that budget on reasoning. The cache keeps thinking
+  and non-thinking runs separate.
 - **OpenRouter (cloud)** — `--backend openrouter` (default). Set `OPENROUTER_API_KEY`.
 - **Codex CLI (authenticated OpenAI provider)** — `--backend codex`, or use
   `--frontier-backend codex` after a local council. It runs ephemeral, read-only
@@ -308,6 +332,11 @@ slug instead when reproducing a historical benchmark or testing a specific model
 A diverse, cross-lineage panel (different labs → different mistakes) is the point. The defaults
 are Phi-4 (Microsoft) + Gemma-3-12B (Google) + Llama-3.1-8B (Meta); swap your own in
 `llmjury.panels` or by passing `panel=[...]` to `Engine`.
+
+```bash
+llmjury solve --task task.txt --tests tests.py --entry-point solve \
+  --backend ollama --models qwen3:8b,qwen3.5:4b,gemma3:12b --best qwen3.5:4b
+```
 
 ## Reproduce the benchmarks
 

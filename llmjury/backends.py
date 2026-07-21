@@ -31,9 +31,14 @@ class Backend:
     def _one(self, model, prompt, temperature, max_tokens):
         raise NotImplementedError
 
+    def _cache_model(self, model):
+        return model
+
     def _sample(self, model, prompt, temperature, max_tokens, i):
         """One cached sample — the unit of work `complete` and `submit` share."""
-        ck = self.cache.key(self.name, model, temperature, max_tokens, i, prompt) if self.cache else None
+        cache_model = self._cache_model(model)
+        ck = self.cache.key(
+            self.name, cache_model, temperature, max_tokens, i, prompt) if self.cache else None
         if ck is not None:
             hit = self.cache.get(ck)
             if hit is not None:
@@ -206,15 +211,19 @@ class DemoBackend(Backend):
 class OllamaBackend(Backend):
     name = "ollama"
 
-    def __init__(self, host="http://localhost:11434", num_ctx=None, **kw):
+    def __init__(self, host="http://localhost:11434", num_ctx=None, think=False, **kw):
         super().__init__(**kw)
         self.host = host.rstrip("/")
+        self.think = think
         # Per-request context cap. Ollama sizes a model's KV cache as
         # num_ctx x OLLAMA_NUM_PARALLEL at load, so a server tuned with a big
         # default context (e.g. 32k for coding-agent use) burns GPU memory on
         # jury runs whose prompts are tiny. A lean num_ctx keeps parallel
         # decode slots cheap enough that the whole council fits in memory.
         self.num_ctx = num_ctx
+
+    def _cache_model(self, model):
+        return f"{model}|host={self.host}|num_ctx={self.num_ctx}|think={self.think}"
 
     def _one(self, model, prompt, temperature, max_tokens):
         options = {"temperature": temperature, "num_predict": max_tokens}
@@ -224,6 +233,7 @@ class OllamaBackend(Backend):
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "think": self.think,
             "options": options,
         }).encode()
         for attempt in range(3):
