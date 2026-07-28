@@ -385,6 +385,14 @@ sandbox, Codex + Ollama + OpenRouter backends, verifier-gated frontier ladders,
 bidirectional Claude/Codex orchestration, and `llmjury reproduce`. Next: more verifier
 types and benchmark runs for adaptive routing policies.
 
+### Contributing from an agent harness
+
+If you drive this repo with a coding agent, keep its scaffolding out of your commits.
+`.claude-harness/` and a generated `CLAUDE.md` are per-machine session state, not project
+configuration — both are gitignored. `AGENTS.md` is the tracked, shared agent guidance;
+put anything a contributor needs there instead. Prefer staging explicit paths over
+`git add -A`, which sweeps this kind of local state into a PR.
+
 ## License
 
 MIT © The AI Collective

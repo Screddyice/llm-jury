@@ -9,10 +9,11 @@ build/
 *.log
 .venv/
 venv/
-# Claude Harness - Ephemeral/Per-Session State
-.claude-harness/sessions/
-.claude-harness/memory/compaction-backups/
-.claude-harness/memory/working/
+# Local agent scaffolding — one contributor's session state, not project config.
+# Ignored whole rather than per-subdirectory: it is generated per machine, so any
+# of it that lands in a commit is noise for everyone else.
+.claude-harness/
+CLAUDE.md
 
 # Claude Code - Local settings
 .claude/settings.local.json
