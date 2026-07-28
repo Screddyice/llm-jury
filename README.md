@@ -65,9 +65,13 @@ llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-
 # or competitive-programming style (stdin/stdout cases as JSON)
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json
 
-# hybrid: local council first, then a verifier-gated open-weight OpenRouter ladder
+# hybrid: local council first, then a verifier-gated OpenRouter ladder
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
     --backend ollama --frontier auto   # needs OPENROUTER_API_KEY
+
+# same, but keep every escalation open-weight (no proprietary top tier)
+llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
+    --backend ollama --frontier open
 
 # Codex-native hybrid: local council first, then the authenticated Codex CLI.
 # No OpenAI API key is required; this reuses `codex login` / ChatGPT-managed auth.
@@ -324,10 +328,33 @@ available to the installed Codex CLI and uses Codex authentication. OpenRouter i
 coupled to Anthropic: any compatible OpenRouter model slug can be used.
 
 `--frontier auto` is the recommended local-first policy. It keeps the cross-lineage
-Ollama council first, then tries DeepSeek V4 Flash for a low-cost cloud recovery and
-DeepSeek V4 Pro for the hard remainder. Every later tier runs only when all earlier
-candidates failed the same oracle, so the faster model cannot lower accuracy. Pin a
-slug instead when reproducing a historical benchmark or testing a specific model.
+Ollama council first, then tries DeepSeek V4 Flash for a low-cost cloud recovery,
+DeepSeek V4 Pro for the hard remainder, and finally Claude Opus 5 for the tail that
+nothing cheaper could verify. Every later tier runs only when all earlier candidates
+failed the same oracle, so the faster model cannot lower accuracy — and the tail that
+reaches the last tier is small by construction.
+
+Cost note: the top tier is proprietary and roughly 35× the per-token price of the
+open-weight tiers below it ($5/$25 per M vs $0.14/$0.28). It is last precisely so it
+bills only on problems two cheaper tiers already failed. Named ladders:
+
+| `--frontier` | Escalation order after the local council |
+|---|---|
+| `auto` | DeepSeek V4 Flash → DeepSeek V4 Pro → Claude Opus 5 |
+| `open` | DeepSeek V4 Flash → DeepSeek V4 Pro (open-weight only, no proprietary tier) |
+| `opus` | Claude Opus 5 |
+| `fable` | Claude Fable 5 |
+| any other value | passed to the provider verbatim as a model slug |
+
+Use `open` to cap escalation spend, or pin a slug when reproducing a historical
+benchmark or testing a specific model. `LLMJURY_TOP_FRONTIER` overrides which model
+`auto` ends on, so the top tier is configurable rather than baked in.
+
+Reasoning models spend part of their token budget on private thinking before emitting
+any code, and providers count those tokens against `max_tokens`. Since the frontier
+tier runs only on the hard tail — where thinking is longest — it gets its own wider
+budget (`frontier_max_tokens`, default `max(max_tokens, 8000)`) so a long deliberation
+cannot truncate the answer.
 
 A diverse, cross-lineage panel (different labs → different mistakes) is the point. The defaults
 are Phi-4 (Microsoft) + Gemma-3-12B (Google) + Llama-3.1-8B (Meta); swap your own in
