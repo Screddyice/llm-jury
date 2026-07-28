@@ -327,6 +327,18 @@ slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a mo
 available to the installed Codex CLI and uses Codex authentication. OpenRouter is not
 coupled to Anthropic: any compatible OpenRouter model slug can be used.
 
+### Caching
+
+Generations are cached in `~/.llmjury/cache.jsonl`, keyed on backend, model,
+temperature, `max_tokens`, sample index, and the prompt. Re-running the same solve is
+therefore free and near-instant: it replays stored samples and never calls the provider.
+The verifier still executes every time, so a cached run reports exactly like a fresh
+one — convenient for iterating on a verifier, and easy to mistake for a live test.
+
+To confirm a run actually reached the provider, compare `wc -l` on the cache before and
+after; zero new lines means nothing was generated. To force a cold run, move the cache
+aside and restore it afterwards.
+
 `--frontier auto` is the recommended local-first policy. It keeps the cross-lineage
 Ollama council first, then tries DeepSeek V4 Flash for a low-cost cloud recovery,
 DeepSeek V4 Pro for the hard remainder, and finally Claude Opus 5 for the tail that

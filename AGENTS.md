@@ -13,6 +13,45 @@ git diff --check
 
 Tests must remain offline by default. Mock provider processes and HTTP calls in unit tests.
 
+### Verifying against a live provider
+
+The completion cache turns a repeated live run into a replay. `~/.llmjury/cache.jsonl`
+keys on (backend, model, temperature, max_tokens, sample index, prompt), so re-running
+an identical `llmjury solve` returns stored generations and never reaches the provider.
+The verifier still executes, so the run looks and reports exactly like a fresh one.
+
+Before claiming a change works against a real provider, prove the generation was live:
+
+```bash
+before=$(wc -l < ~/.llmjury/cache.jsonl)
+llmjury solve --task task.txt --cases cases.json --entry-point solve \
+    --backend ollama --frontier auto
+after=$(wc -l < ~/.llmjury/cache.jsonl)
+echo "new cache entries: $((after - before))"   # 0 means nothing was generated
+```
+
+Two checks that look convincing and prove nothing:
+
+- **The cache file's mtime.** It reflects whichever run wrote last, which is easy to
+  read as the current one when runs are minutes apart.
+- **Grepping the cache for a model name.** Keys are hashed, so a grep returns nothing
+  whether or not the model ran.
+
+For a genuinely cold run, move the cache aside and restore it from a shell trap, so an
+interrupted or failed run cannot leave it missing:
+
+```bash
+trap 'mv -f ~/.llmjury/cache.jsonl.bak ~/.llmjury/cache.jsonl' EXIT INT TERM
+mv ~/.llmjury/cache.jsonl ~/.llmjury/cache.jsonl.bak
+# ... run ...
+```
+
+Confirm the restored file matches the original with `shasum -a 256`.
+
+`LLMJURY_SANDBOX=off` prints a `sandbox=host` warning whether or not a container runtime
+is available. It reports that the sandbox was disabled, not that Docker is down — check
+`docker info` before concluding otherwise. A sandboxed run prints `sandbox=container`.
+
 ## Provider Boundaries
 
 - Ollama is the local/private council backend.
@@ -28,6 +67,11 @@ Tests must remain offline by default. Mock provider processes and HTTP calls in 
 - Cost ordering is a correctness property of the ladder, not a preference. The
   proprietary tier costs ~35× the open-weight tiers, so it must stay last and stay
   verifier-gated; a test asserts that ordering. Never fan out across tiers.
+- The ordering earns its keep, measured rather than assumed. Well-known algorithmic
+  problems are solved by the local council alone, even under an oracle that enforces an
+  O(n log n) bound — their solutions are memorised. What escalates is a task whose shape
+  is genuinely new, and the first cloud tier absorbs most of that. Treat any change that
+  moves work to a later tier by default as a regression until a benchmark says otherwise.
 - The recommended hybrid route is `--backend ollama --frontier auto`: local council
   first, then the ordered OpenRouter ladder only when verification fails.
 - The verifier, not the provider, decides which candidate is accepted.
