@@ -1,0 +1,24 @@
+{
+  "version": 3,
+  "lastUpdated": "2026-07-18T06:19:17Z",
+  "currentSession": null,
+  "projectContext": {
+    "name": "llm-jury",
+    "techStack": ["Python"],
+    "testingFramework": "pytest",
+    "buildCommand": "",
+    "testCommand": "pytest"
+  },
+  "architecturalDecisions": [],
+  "activeConstraints": [],
+  "sharedState": {
+    "discoveredPatterns": {},
+    "fileIndex": {
+      "components": [],
+      "apiRoutes": [],
+      "tests": [],
+      "configs": []
+    }
+  },
+  "agentResults": []
+}

@@ -1,0 +1,17 @@
+{
+  "lastUpdated": "2026-07-18T06:19:17Z",
+  "currentProject": "llm-jury",
+  "lastSession": {
+    "summary": "Initial harness setup (v3.0)",
+    "completedTasks": [],
+    "blockers": [],
+    "nextSteps": ["Review CLAUDE.md and customize", "Run /claude-harness:start to begin"]
+  },
+  "recentChanges": [],
+  "knownIssues": [],
+  "environmentState": {
+    "devServerRunning": false,
+    "lastSuccessfulBuild": null,
+    "lastTypeCheck": null
+  }
+}

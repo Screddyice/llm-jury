@@ -294,14 +294,68 @@ def test_cli_backend_can_enable_ollama_thinking():
 
 def test_cli_auto_frontier_resolves_open_source_ladder():
     from llmjury.cli import _frontier_models
-    from llmjury.panels import OPEN_SOURCE_FRONTIER
-    assert _frontier_models("auto", "openrouter") == OPEN_SOURCE_FRONTIER
+    from llmjury.panels import AUTO_FRONTIER, OPEN_SOURCE_FRONTIER
+    assert _frontier_models("auto", "openrouter") == AUTO_FRONTIER
+    assert _frontier_models("open", "openrouter") == OPEN_SOURCE_FRONTIER
     assert _frontier_models("custom/model", "openrouter") == "custom/model"
     try:
         _frontier_models("auto", "codex")
         assert False, "auto must reject non-OpenRouter frontier backends"
     except ValueError:
         pass
+
+
+def test_auto_frontier_tries_open_weight_before_the_paid_top_tier():
+    """Cost ordering is the whole point: the proprietary tier must be last."""
+    from llmjury.panels import AUTO_FRONTIER, OPEN_SOURCE_FRONTIER, TOP_FRONTIER
+    assert AUTO_FRONTIER[:len(OPEN_SOURCE_FRONTIER)] == OPEN_SOURCE_FRONTIER
+    assert AUTO_FRONTIER[-1] == TOP_FRONTIER
+    assert TOP_FRONTIER not in OPEN_SOURCE_FRONTIER
+
+
+def test_cli_named_frontier_aliases_resolve_to_slugs():
+    from llmjury.cli import _frontier_models
+    assert _frontier_models("opus", "openrouter") == ["anthropic/claude-opus-5"]
+    assert _frontier_models("fable", "openrouter") == ["anthropic/claude-fable-5"]
+    try:
+        _frontier_models("opus", "codex")
+        assert False, "named ladders must reject non-OpenRouter frontier backends"
+    except ValueError:
+        pass
+
+
+def test_openrouter_never_returns_thinking_as_an_answer():
+    """A truncated reasoning model leaves content empty and reasoning full of prose.
+
+    Passing that through as a candidate burns a verifier pass on text that was
+    never an answer; only reasoning that actually carries code is recoverable.
+    """
+    from llmjury.backends import _answer_from_reasoning
+    assert _answer_from_reasoning("The user is asking for a function.") == ""
+    assert _answer_from_reasoning("") == ""
+    assert _answer_from_reasoning(None) == ""
+    stranded = "```python\ndef add(a, b):\n    return a + b\n```"
+    assert _answer_from_reasoning(stranded) == stranded
+
+
+def test_frontier_tier_gets_token_headroom_for_reasoning():
+    """Reasoning tokens count against max_tokens, so the last tier needs more."""
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
+    council = _FakeBackend({"local": [_BAD]})
+    frontier = _FakeBackend({"top": [_GOOD]})
+    eng = Engine(council, panel=["local"], best="local", k=1, max_tokens=4000,
+                 frontier="top", frontier_backend=frontier)
+    assert eng.frontier_max_tokens == 8000
+    eng.solve("add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
+    # the council keeps its own budget; only the frontier call is widened
+    assert council.calls[0][-1] == 4000
+    assert frontier.calls[0][-1] == 8000
+
+    explicit = Engine(council, panel=["local"], best="local", k=1,
+                      max_tokens=4000, frontier="top", frontier_backend=frontier,
+                      frontier_max_tokens=32000)
+    assert explicit.frontier_max_tokens == 32000
 
 
 def test_engine_frontier_escalation():

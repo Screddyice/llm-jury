@@ -39,7 +39,7 @@ class Result:
 class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
                  k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
-                 route=None, workers=None):
+                 route=None, workers=None, frontier_max_tokens=None):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -52,6 +52,12 @@ class Engine:
         # only after every cheaper/local tier failed the same oracle.
         self.frontier = ([frontier] if isinstance(frontier, str) else list(frontier or []))
         self.frontier_backend = frontier_backend or backend
+        # Reasoning models spend part of `max_tokens` on private thinking before
+        # emitting a single character of code, and providers count those tokens
+        # against the same budget. The frontier tier runs only on the hard tail —
+        # exactly where thinking is longest — so a budget sized for the council
+        # truncates the answer precisely when it matters most. Give it headroom.
+        self.frontier_max_tokens = frontier_max_tokens or max(max_tokens, 8000)
         # Per-model backend overrides: a panelist named here generates through its own
         # backend instead of the shared one. Lets a custom local model — e.g. a
         # fine-tuned MLX brain on an OpenAI-compatible endpoint — sit in the council
@@ -62,7 +68,7 @@ class Engine:
         # in flight at once.
         self.workers = workers or min(16, max(4, self.k * max(1, len(self.panel))))
 
-    def _submit(self, ex, pairs, prompt):
+    def _submit(self, ex, pairs, prompt, max_tokens=None):
         """Queue k samples for every (model, backend) pair; return {future: model}.
 
         Backends that expose `submit` (all the built-ins) give one future per
@@ -70,16 +76,17 @@ class Engine:
         backend that only has `complete` gets one future wrapping its whole
         batch — same result, just coarser overlap.
         """
+        mt = max_tokens or self.max_tokens
         futs = {}
         for model, backend in pairs:
             if hasattr(backend, "submit"):
                 for f in backend.submit(ex, model, prompt, n=self.k,
                                         temperature=self.temperature,
-                                        max_tokens=self.max_tokens):
+                                        max_tokens=mt):
                     futs[f] = model
             else:
                 futs[ex.submit(backend.complete, model, prompt, self.k,
-                               self.temperature, self.max_tokens)] = model
+                               self.temperature, mt)] = model
         return futs
 
     def solve(self, task, verifier, escalate=True):
@@ -96,8 +103,9 @@ class Engine:
         def backend_for(m):
             return self.route.get(m, self.backend)
 
-        def run_stage(ex, pairs, stage):
-            for fut, model in _in_completion_order(self._submit(ex, pairs, prompt)):
+        def run_stage(ex, pairs, stage, max_tokens=None):
+            for fut, model in _in_completion_order(
+                    self._submit(ex, pairs, prompt, max_tokens)):
                 out = fut.result()
                 for text in ([out] if isinstance(out, str) else out):
                     seen.append((model, text))
@@ -127,7 +135,8 @@ class Engine:
             # hard minority, not on every problem.
             if escalate and self.frontier:
                 for model in self.frontier:
-                    r = run_stage(ex, [(model, self.frontier_backend)], "frontier")
+                    r = run_stage(ex, [(model, self.frontier_backend)], "frontier",
+                                  self.frontier_max_tokens)
                     if r:
                         return r
         finally:

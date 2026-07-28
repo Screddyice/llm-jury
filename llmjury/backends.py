@@ -21,6 +21,21 @@ _RETRYABLE = (408, 429, 500, 502, 503, 520, 524)
 _HTTP_MSG = {401: "invalid API key", 402: "insufficient credits", 403: "forbidden"}
 
 
+def _answer_from_reasoning(reasoning):
+    """Rescue an answer stranded in `reasoning`, but never pass off thinking as one.
+
+    Some providers return content=null and put the whole answer in the reasoning
+    field — worth recovering. But a reasoning model whose response was truncated
+    (finish_reason=length) leaves content empty and reasoning full of private
+    deliberation. Returning that as a candidate spends a verifier pass on prose
+    that was never meant to be code, and reads like a model failure rather than a
+    truncation. Only accept reasoning that actually carries code.
+    """
+    if not reasoning:
+        return ""
+    return reasoning if ("```" in reasoning or "def " in reasoning) else ""
+
+
 class Backend:
     name = "backend"
 
@@ -118,7 +133,7 @@ class OpenRouterBackend(Backend):
                     sys.stderr.write(f"[llmjury] openrouter {model}: empty response\n")
                     return ""
                 m = choices[0].get("message", {}) or {}
-                return m.get("content") or m.get("reasoning") or ""
+                return m.get("content") or _answer_from_reasoning(m.get("reasoning"))
             except urllib.error.HTTPError as e:
                 if e.code in _RETRYABLE:
                     time.sleep(3 * (attempt + 1))

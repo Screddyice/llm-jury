@@ -44,13 +44,18 @@ def _refuse_root():
 
 
 def _frontier_models(value, backend_name):
-    """Resolve CLI shorthand without making a provider call."""
-    if value != "auto":
+    """Resolve CLI shorthand without making a provider call.
+
+    Named ladders (auto/open/opus/fable) expand to OpenRouter slugs; anything
+    else is passed through to the chosen provider verbatim.
+    """
+    from .panels import FRONTIER_ALIASES
+    if value not in FRONTIER_ALIASES:
         return value
     if backend_name != "openrouter":
-        raise ValueError("--frontier auto requires --frontier-backend openrouter")
-    from .panels import OPEN_SOURCE_FRONTIER
-    return list(OPEN_SOURCE_FRONTIER)
+        raise ValueError(
+            f"--frontier {value} requires --frontier-backend openrouter")
+    return list(FRONTIER_ALIASES[value])
 
 
 def _func_cases(raw):
@@ -136,9 +141,10 @@ def cmd_solve(a):
         frontier = _frontier_models(a.frontier, a.frontier_backend)
     except ValueError as e:
         sys.exit(f"error: {e}")
-    if a.frontier == "auto":
+    from .panels import FRONTIER_ALIASES
+    if a.frontier in FRONTIER_ALIASES:
         sys.stderr.write(
-            "[llmjury] open-source auto route: local council -> "
+            f"[llmjury] {a.frontier} route: local council -> "
             + " -> ".join(frontier) + " (verifier-gated)\n")
     fb = None
     if frontier:
@@ -298,8 +304,9 @@ def main():
     s.add_argument("--models", help="comma-separated council models (overrides the default panel)")
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
-    s.add_argument("--frontier", help="opt-in: a cloud model to try when the council can't verify; "
-                   "use 'auto' for the verifier-gated open-weight OpenRouter ladder")
+    s.add_argument("--frontier", help="opt-in: a cloud model to try when the council can't verify. "
+                   "Named ladders: 'auto' (open-weight, then a proprietary top tier), "
+                   "'open' (open-weight only), 'opus', 'fable'. Any other value is a provider slug")
     s.add_argument("--frontier-backend", default="openrouter",
                    choices=["openrouter", "codex"],
                    help="provider for --frontier (default: openrouter; codex reuses Codex CLI auth)")
