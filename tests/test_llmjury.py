@@ -53,7 +53,7 @@ def test_functional_verifier_pass_and_fail():
 
 def test_functional_verifier_rejects_non_python_oracle_before_generation():
     """A malformed oracle must fail before any paid or long-running model call."""
-    invalid = "type Cursor = { id: string }\n"
+    invalid = 'const cursor: Cursor = { id: "first" };\n'
     try:
         FunctionalCodeVerifier(invalid, "solve")
         assert False, "TypeScript passed as --tests must be rejected"
