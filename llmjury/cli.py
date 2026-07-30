@@ -115,7 +115,10 @@ def cmd_solve(a):
         if not a.entry_point:
             sys.stderr.write("[llmjury] note: no --entry-point given; assuming 'solve'. "
                              "Pass --entry-point if your function has another name.\n")
-        verifier = FunctionalCodeVerifier(_read(a.tests), ep)
+        try:
+            verifier = FunctionalCodeVerifier(_read(a.tests), ep)
+        except ValueError as error:
+            sys.exit(f"error: invalid --tests verifier: {error}")
     else:
         sys.exit("error: provide --tests (functional check) or --cases (stdin/stdout JSON)")
 

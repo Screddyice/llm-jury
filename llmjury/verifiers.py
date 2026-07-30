@@ -16,6 +16,7 @@ isolated temp dir, POSIX CPU/file/core limits) but is NOT a real sandbox — for
 input keep the container (the default), or run inside your own VM.
 """
 import os
+import keyword
 import re
 import sys
 import time
@@ -331,6 +332,32 @@ class FunctionalCodeVerifier(Verifier):
         self.entry_point = entry_point
         self.header = header
         self.timeout = timeout
+        self._validate_contract()
+
+    def _test_program(self):
+        """Return the oracle in the same shape verification executes."""
+        return self.test if re.search(r"(?m)^\s*def\s+check\s*\(", self.test or "") \
+            else "def check(candidate):\n" + textwrap.indent(self.test or "pass", "    ")
+
+    def _validate_contract(self):
+        """Reject broken verifier infrastructure before generating candidates."""
+        if not self.entry_point.isidentifier() or keyword.iskeyword(self.entry_point):
+            raise ValueError(
+                f"entry point {self.entry_point!r} is not a valid Python identifier")
+        try:
+            compile(self.header or "pass", "<llmjury-header>", "exec")
+        except SyntaxError as error:
+            location = f"line {error.lineno}" if error.lineno else "unknown line"
+            raise ValueError(
+                f"header must contain valid Python ({location}: {error.msg})") from error
+        full_check = bool(re.search(r"(?m)^\s*def\s+check\s*\(", self.test or ""))
+        try:
+            compile(self._test_program(), "<llmjury-tests>", "exec")
+        except SyntaxError as error:
+            line = error.lineno if full_check else max(1, (error.lineno or 1) - 1)
+            location = f"line {line}"
+            raise ValueError(
+                f"--tests must contain valid Python ({location}: {error.msg})") from error
 
     @classmethod
     def from_cases(cls, entry_point, cases, **kw):
@@ -352,8 +379,7 @@ class FunctionalCodeVerifier(Verifier):
         if not code:
             return False
         # Accept a full `def check(candidate): ...` OR just its body (assert lines).
-        test = self.test if re.search(r"(?m)^\s*def\s+check\s*\(", self.test or "") \
-            else "def check(candidate):\n" + textwrap.indent(self.test or "pass", "    ")
+        test = self._test_program()
         program = (
             f"{self.header}\n{code}\n\n{test}\n\n"
             f"check({self.entry_point})\nprint('LLMJURY_OK')"

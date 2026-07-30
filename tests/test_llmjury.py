@@ -51,6 +51,41 @@ def test_functional_verifier_pass_and_fail():
     assert not FunctionalCodeVerifier(tests, "add").verify(bad)
 
 
+def test_functional_verifier_rejects_non_python_oracle_before_generation():
+    """A malformed oracle must fail before any paid or long-running model call."""
+    invalid = "type Cursor = { id: string }\n"
+    try:
+        FunctionalCodeVerifier(invalid, "solve")
+        assert False, "TypeScript passed as --tests must be rejected"
+    except ValueError as error:
+        assert "valid Python" in str(error)
+
+
+def test_cli_rejects_invalid_tests_before_constructing_backend():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from llmjury.cli import cmd_solve
+
+    with tempfile.TemporaryDirectory() as tmp:
+        task = Path(tmp) / "task.txt"
+        tests = Path(tmp) / "tests.ts"
+        task.write_text("implement solve", encoding="utf-8")
+        tests.write_text("type Cursor = { id: string }\n", encoding="utf-8")
+        args = SimpleNamespace(
+            task=str(task), tests=str(tests), cases=None, entry_point=None,
+        )
+        with patch(
+            "llmjury.cli._backend",
+            side_effect=AssertionError("backend constructed before verifier validation"),
+        ) as backend:
+            try:
+                cmd_solve(args)
+                assert False, "invalid tests must stop the CLI"
+            except SystemExit as error:
+                assert "invalid --tests verifier" in str(error)
+            backend.assert_not_called()
+
+
 def test_stdio_verifier_pass_and_fail():
     cases = [{"input": "2 3\n", "output": "5\n"}]
     good = "```python\na, b = map(int, input().split())\nprint(a + b)\n```"
@@ -217,6 +252,46 @@ def test_ollama_backend_disables_thinking_by_default():
 
     body = json.loads(requests[0][0].data)
     assert body["think"] is False
+
+
+def test_openrouter_timeout_is_reported_once_without_hidden_retries():
+    import contextlib
+    import io
+    import urllib.error
+    from unittest.mock import patch
+    from llmjury.backends import OpenRouterBackend
+
+    backend = OpenRouterBackend(api_key="test", request_timeout=7)
+    timeout_errors = [
+        TimeoutError("provider stopped responding"),
+        urllib.error.URLError(TimeoutError("provider stopped responding")),
+    ]
+
+    for timeout_error in timeout_errors:
+        calls = 0
+
+        def timeout(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            raise timeout_error
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), \
+                patch("llmjury.backends.urllib.request.urlopen", side_effect=timeout):
+            assert backend.complete("test/model", "solve", n=1) == [""]
+
+        assert calls == 1
+        assert "timed out after 7s" in stderr.getvalue()
+
+
+def test_openrouter_rejects_non_positive_timeout():
+    from llmjury.backends import OpenRouterBackend
+
+    try:
+        OpenRouterBackend(api_key="test", request_timeout=0)
+        assert False, "zero timeout must be rejected"
+    except ValueError as error:
+        assert "greater than zero" in str(error)
 
 
 def test_ollama_cache_separates_thinking_modes():

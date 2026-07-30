@@ -83,6 +83,11 @@ llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-
     --backend codex --models gpt-5.6-sol
 ```
 
+`--tests` accepts Python only: either a complete `check(candidate)` function or its
+body. LLM-Jury compiles that oracle before it loads a backend, starts Ollama, or sends
+an OpenRouter request. A TypeScript, malformed, or otherwise invalid test file exits
+with a line-specific error instead of making every generated candidate fail.
+
 **Python:**
 
 ```python
@@ -367,6 +372,11 @@ any code, and providers count those tokens against `max_tokens`. Since the front
 tier runs only on the hard tail — where thinking is longest — it gets its own wider
 budget (`frontier_max_tokens`, default `max(max_tokens, 8000)`) so a long deliberation
 cannot truncate the answer.
+
+OpenRouter requests have a 180-second socket timeout. A timeout ends that sample
+without the prior silent retry loop, so one stalled provider request cannot hold a
+frontier tier for up to 20 minutes. Set `LLMJURY_OPENROUTER_TIMEOUT` to a positive
+number of seconds when a slower provider needs more room.
 
 A diverse, cross-lineage panel (different labs → different mistakes) is the point. The defaults
 are Phi-4 (Microsoft) + Gemma-3-12B (Google) + Llama-3.1-8B (Meta); swap your own in

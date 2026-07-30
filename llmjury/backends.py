@@ -7,6 +7,7 @@ Stdlib only — no `requests`, no SDKs.
 import os
 import sys
 import json
+import socket
 import time
 import urllib.request
 import urllib.error
@@ -85,8 +86,19 @@ class OpenRouterBackend(Backend):
     name = "openrouter"
     API = "https://openrouter.ai/api/v1/chat/completions"
 
-    def __init__(self, api_key=None, **kw):
+    def __init__(self, api_key=None, request_timeout=None, **kw):
         super().__init__(**kw)
+        configured_timeout = (
+            request_timeout
+            if request_timeout is not None
+            else os.environ.get("LLMJURY_OPENROUTER_TIMEOUT", "180")
+        )
+        try:
+            self.request_timeout = int(configured_timeout)
+        except (TypeError, ValueError) as error:
+            raise ValueError("OpenRouter timeout must be an integer number of seconds") from error
+        if self.request_timeout <= 0:
+            raise ValueError("OpenRouter timeout must be greater than zero")
         self.key = api_key or os.environ.get("OPENROUTER_API_KEY") or self._from_env_file()
         if not self.key:
             raise RuntimeError(
@@ -122,7 +134,7 @@ class OpenRouterBackend(Backend):
         for attempt in range(4):
             try:
                 req = urllib.request.Request(self.API, data=body, headers=h, method="POST")
-                with urllib.request.urlopen(req, timeout=300) as r:
+                with urllib.request.urlopen(req, timeout=self.request_timeout) as r:
                     d = json.load(r)
                 # OpenRouter can return HTTP 200 with an error body (rate-limit, moderation, ...).
                 if isinstance(d, dict) and d.get("error"):
@@ -141,7 +153,17 @@ class OpenRouterBackend(Backend):
                 sys.stderr.write(f"[llmjury] openrouter {model}: {_HTTP_MSG.get(e.code, f'HTTP {e.code}')}\n")
                 return ""
             except urllib.error.URLError as e:
+                if isinstance(e.reason, (TimeoutError, socket.timeout)):
+                    sys.stderr.write(
+                        f"[llmjury] openrouter {model}: timed out after "
+                        f"{self.request_timeout}s\n")
+                    return ""
                 sys.stderr.write(f"[llmjury] cannot reach OpenRouter ({e.reason}) — check your connection\n")
+                return ""
+            except (TimeoutError, socket.timeout):
+                sys.stderr.write(
+                    f"[llmjury] openrouter {model}: timed out after "
+                    f"{self.request_timeout}s\n")
                 return ""
             except Exception:
                 time.sleep(3 * (attempt + 1))
