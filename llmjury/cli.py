@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import argparse
+from pathlib import Path
 
 from . import __version__
 from .engine import Engine
@@ -111,11 +112,19 @@ def cmd_solve(a):
             # bare --cases: stdin/stdout contract (a full program reading stdin)
             verifier = StdioCodeVerifier(cases)
     elif a.tests:
+        tests_suffix = Path(a.tests).suffix.lower()
+        if tests_suffix and tests_suffix not in {".py", ".pyw"}:
+            sys.exit(
+                f"error: invalid --tests verifier: expected a Python file, got "
+                f"{tests_suffix}")
         ep = a.entry_point or "solve"
         if not a.entry_point:
             sys.stderr.write("[llmjury] note: no --entry-point given; assuming 'solve'. "
                              "Pass --entry-point if your function has another name.\n")
-        verifier = FunctionalCodeVerifier(_read(a.tests), ep)
+        try:
+            verifier = FunctionalCodeVerifier(_read(a.tests), ep)
+        except ValueError as error:
+            sys.exit(f"error: invalid --tests verifier: {error}")
     else:
         sys.exit("error: provide --tests (functional check) or --cases (stdin/stdout JSON)")
 
