@@ -528,12 +528,32 @@ llmjury solve --task task.txt --tests tests.py --entry-point solve \
 llmjury reproduce humaneval            # bundled 25-problem slice
 llmjury reproduce lcb --n 5            # quick check
 llmjury reproduce lcb --backend ollama  # run it locally
+llmjury reproduce lcb --backend ollama --num-ctx 4096   # tighter KV on a small host
 ```
 
 It runs the council on a bundled benchmark slice and reports how many problems the single best
 model solves versus what the diverse council adds on escalation — the "council adds coverage"
 story, in one command. (The bundled slices are 25 problems each; the headline 97.6% / 75.6%
 figures are the larger full runs from the write-up.)
+
+The Ollama path pins `--num-ctx` (default 8192) and runs the same RAM preflight as `solve`.
+Both matter: Ollama sizes KV as `num_ctx x OLLAMA_NUM_PARALLEL` **at load**, so inheriting a
+server default of 32k inflates every panelist by 1.6-1.9x, and a benchmark sweep is the most
+likely way to hold the whole council resident at once.
+
+Measured on a 36 GiB Mac with the shipped local panel at `OLLAMA_NUM_PARALLEL=2`:
+
+```
+llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b + phi4-mini:3.8b
+  single best model + verified best-of-4:   19/25 = 76.0%
+  + diverse council (escalation):            +0  ->  19/25 = 76.0%
+```
+
+Two honest caveats. This is the 25-problem slice, not the 45-problem run behind the headline,
+so 76.0% here and the published 75.6% are not the same measurement. And on this slice the
+council added **nothing** over the best model alone: every pass came from `gemma3:12b` at the
+`single` stage. Council escalation earns its keep on harder distributions than the bundled
+slice — treat `+0` as a property of this sample, not a refutation of the method.
 
 ## Status
 
