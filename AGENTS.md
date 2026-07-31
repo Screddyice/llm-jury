@@ -66,6 +66,10 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
   frontmatter as strict YAML and silently drops any file whose unquoted description
   contains a colon-space; Claude Code tolerates it, so the breakage is invisible without
   `grok inspect`. A test enforces the quoting.
+- The shipped agent must stay free of a `model:` pin. Hosts differ in how they treat a
+  pin they cannot resolve: sessions on the official Anthropic API fail the spawn, while
+  Grok ignores the pin and runs the agent on its session model. An unpinned agent is
+  correct everywhere; a pinned one is silently wrong somewhere.
 - OpenRouter is a model-agnostic cloud provider. The backend must stay model-agnostic:
   no Anthropic-specific request shapes, response parsing, or auth paths. Model choice
   is policy, expressed as data in `llmjury.panels`, never wired into transport code.

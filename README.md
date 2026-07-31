@@ -150,6 +150,13 @@ model. Verify discovery with `grok inspect`.
 > spawned, with no error anywhere. Keep descriptions as quoted YAML scalars. The shipped
 > agent and skills do, and a test enforces it.
 
+> **Model-pin gotcha.** A `model:` pin Grok cannot resolve is ignored rather than
+> rejected: the spawn succeeds and the agent runs on the session model instead. An agent
+> pinned to a local model therefore runs on a cloud one in Grok, silently, which is why
+> `llm-jury-fusion` ships with no `model:` pin at all. If you keep locally-pinned agents
+> in `~/.claude/agents/`, disable them for Grok with `[subagents.toggle]` in
+> `~/.grok/config.toml`. Note `grok inspect` lists discovered agents, not spawnable ones.
+
 ```text
 Start in Claude:  Claude plan → Codex execute ─┐
                                                ├→ tests/diff → done
