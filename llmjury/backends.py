@@ -229,6 +229,77 @@ class CodexBackend(Backend):
             return (completed.stdout or "").strip()
 
 
+class GrokBackend(Backend):
+    """Generate candidates through the authenticated Grok CLI.
+
+    The Grok counterpart to CodexBackend, and isolated for the same reason: Grok
+    runs headless with no tools, no subagents, no memory and a single turn, in an
+    empty working directory. It therefore never sees the repository or its
+    instructions — LLM-Jury supplies the task and independently verifies whatever
+    comes back.
+
+    Auth is the Grok CLI's own session, so escalating here costs nothing beyond the
+    existing subscription. That is the point: inside the Grok CLI this is the tier
+    to reach for before spending OpenRouter credits.
+    """
+    name = "grok"
+
+    def __init__(self, executable="grok", timeout=600, reasoning_effort="low",
+                 runner=None, **kw):
+        super().__init__(**kw)
+        self.executable = executable
+        self.timeout = timeout
+        self.reasoning_effort = reasoning_effort
+        self.runner = runner or subprocess.run
+        if runner is None and not shutil.which(executable):
+            raise RuntimeError(
+                "Grok CLI not found. Install and authenticate Grok, or use "
+                "--backend ollama/openrouter.")
+
+    def _one(self, model, prompt, temperature, max_tokens):
+        # Grok owns its sampling and output budget, exactly as Codex does. Keeping
+        # the Backend signature lets it join the same verified escalation ladder.
+        with tempfile.TemporaryDirectory(prefix="llmjury-grok-") as workdir:
+            cmd = [
+                self.executable,
+                "--sandbox", "read-only",
+                "--tools", "",              # a generator, not an agent
+                "--no-subagents", "--no-memory", "--no-plan",
+                "--max-turns", "1",
+                "--output-format", "plain",
+                "--permission-mode", "dontAsk",
+                "--cwd", workdir,
+            ]
+            if model:
+                cmd.extend(["--model", model])
+            if self.reasoning_effort:
+                cmd.extend(["--reasoning-effort", self.reasoning_effort])
+            # Last, and as the value of -p, so a prompt starting with "--" is never
+            # parsed as a flag.
+            cmd.extend(["-p", prompt])
+            try:
+                completed = self.runner(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    timeout=self.timeout, check=False,
+                )
+            except subprocess.TimeoutExpired:
+                sys.stderr.write(
+                    f"[llmjury] grok {model or '(configured default)'} timed out "
+                    f"after {self.timeout}s\n")
+                return ""
+            except OSError as e:
+                sys.stderr.write(f"[llmjury] cannot run Grok CLI: {e}\n")
+                return ""
+            if completed.returncode != 0:
+                detail = (completed.stderr or "").strip().splitlines()
+                suffix = f": {detail[-1]}" if detail else ""
+                sys.stderr.write(
+                    f"[llmjury] grok {model or '(configured default)'} exited "
+                    f"{completed.returncode}{suffix}\n")
+                return ""
+            return (completed.stdout or "").strip()
+
+
 class DemoBackend(Backend):
     """Offline, canned backend so `llmjury demo` runs with no API key and no Ollama —
     while still exercising the REAL generate->verify->select->escalate pipeline and the

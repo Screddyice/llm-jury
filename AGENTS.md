@@ -57,6 +57,19 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
 - Ollama is the local/private council backend.
 - Codex CLI is an authenticated OpenAI provider and may be used directly or as the
   frontier tier. It must run ephemeral and read-only for candidate generation.
+- Grok CLI is an authenticated xAI provider with the same contract: read-only sandbox,
+  no tools, no subagents, no memory, one turn, empty temp cwd. Both CLI providers
+  authenticate from their own session, so escalating to them spends no metered credit —
+  inside those CLIs, prefer them over an OpenRouter ladder. Named ladders resolve to
+  OpenRouter slugs and must keep rejecting `--frontier-backend codex`/`grok`.
+- Agent and skill frontmatter must keep `description:` a quoted YAML scalar. Grok parses
+  frontmatter as strict YAML and silently drops any file whose unquoted description
+  contains a colon-space; Claude Code tolerates it, so the breakage is invisible without
+  `grok inspect`. A test enforces the quoting.
+- The shipped agent must stay free of a `model:` pin. Hosts differ in how they treat a
+  pin they cannot resolve: sessions on the official Anthropic API fail the spawn, while
+  Grok ignores the pin and runs the agent on its session model. An unpinned agent is
+  correct everywhere; a pinned one is silently wrong somewhere.
 - OpenRouter is a model-agnostic cloud provider. The backend must stay model-agnostic:
   no Anthropic-specific request shapes, response parsing, or auth paths. Model choice
   is policy, expressed as data in `llmjury.panels`, never wired into transport code.
