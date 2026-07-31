@@ -25,21 +25,10 @@ REFERENCE = {
 }
 
 
-# Same default as `llmjury solve --num-ctx`. Ollama sizes KV as num_ctx x
-# OLLAMA_NUM_PARALLEL *at load*, so leaving this unset does not mean "small" — it means
-# the server's own default, which on a host tuned for coding agents is commonly 32k.
-# This path used to pass nothing: on a 36 GiB Mac that loaded llama3.1:8b at 13.0 GB
-# and phi4-mini:3.8b at 8.9 GB against memguard estimates of 8.0 and 4.8, i.e. 1.6-1.9x,
-# and the third panelist would have taken the host past its RAM. Benchmark prompts are
-# tiny, so the large context bought nothing and only inflated the KV cache.
-DEFAULT_NUM_CTX = 8192
-
-
-def _backend(name, num_ctx=DEFAULT_NUM_CTX):
+def _backend(name):
     if name == "ollama":
         from ..backends import OllamaBackend
-        # max_workers=2 is gentler on the GPU; num_ctx must be explicit (see above).
-        return OllamaBackend(cache_path=CACHE, max_workers=2, num_ctx=num_ctx)
+        return OllamaBackend(cache_path=CACHE, max_workers=2)  # gentler on the GPU
     from ..backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -50,29 +39,12 @@ def _verifier(which, p):
     return StdioCodeVerifier(p["cases"])
 
 
-def run(which, backend="openrouter", n=None, k=4, pace=0.0, num_ctx=DEFAULT_NUM_CTX):
+def run(which, backend="openrouter", n=None, k=4, pace=0.0):
     with open(os.path.join(DATA, f"{which}_slice.json"), encoding="utf-8") as fh:
         probs = json.load(fh)
     if n:
         probs = probs[:n]
-    be = _backend(backend, num_ctx=num_ctx)
-
-    # Same preflight `llmjury solve` runs. A benchmark sweep is the *most* likely way to
-    # load every panelist at once, and Ollama caps residency by model count rather than
-    # bytes, so an over-large panel takes the host down instead of failing catchably.
-    if backend == "ollama":
-        from ..memguard import check as memory_check
-        from ..panels import default_panel
-        best, panel = default_panel("ollama")
-        report = memory_check([best] + [m for m in panel if m != best],
-                              host=be.host, num_ctx=num_ctx)
-        if not report.ok:
-            raise SystemExit(
-                "[llmjury] " + report.message() + "\n"
-                "error: this panel would over-commit the host, which can hang or panic it.\n"
-                f"hint: {report.hint()}")
-
-    eng = Engine(be, k=k)
+    eng = Engine(_backend(backend), k=k)
 
     single = council = 0
     print(f"Reproducing {which} on {len(probs)} problems (backend={backend}, k={k})...\n", flush=True)

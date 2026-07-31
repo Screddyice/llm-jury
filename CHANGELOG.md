@@ -2,43 +2,6 @@
 
 ## Unreleased
 
-- **Refuse local panels that do not fit in RAM.** A council loads every panelist at
-  once, but Ollama caps residency by model count (default 3, exactly a panel), never by
-  bytes, so nothing knew the aggregate. The previous default panel measured 34 GB
-  resident on a 36 GB host and panicked it twice on 2026-07-31: wired GPU allocations
-  cannot be paged out, so the machine starves its kernel watchdog instead of raising an
-  out-of-memory error a caller could catch. `llmjury solve --backend ollama` now
-  preflights the panel against physical RAM and exits with the arithmetic and a
-  remediation hint. Budget defaults to 70% of RAM (`LLMJURY_MEM_FRACTION`); relax with
-  `--mem-check warn|off`. The check skips rather than blocking when it cannot tell.
-- **Resize the default local panel** from `phi4 + gemma3:12b + llama3.1:8b` (34 GB) to
-  `llama3.1:8b + phi4-mini:3.8b + granite4.1:3b` (~19 GB), still cross-lineage. Because
-  LLM-Jury verifies rather than votes, weaker panelists escalate more often rather than
-  returning worse answers, so this trades escalation spend for host stability. Pass
-  `--models` to restore a larger panel on a larger host.
-- **Restore a 12B panelist and the benchmarked lineage mix.** The resize above was
-  measured against Ollama's stock 4 parallel slots, and at ~19.7 GiB it left roughly a
-  fifth of the budget unused. More importantly it broke a design property that was
-  never written down: `LOCAL_PANEL` had always mirrored `CLOUD_PANEL`, the panel the
-  published benchmarks were run with, so the local council *was* the benchmarked
-  council run locally. Dropping to `llama3.1:8b + phi4-mini:3.8b + granite4.1:3b`
-  swapped Google out for IBM and quietly made the benchmark a weaker description of
-  local behaviour.
-
-  The default is now `gemma3:12b + llama3.1:8b + phi4-mini:3.8b` at 23.4 GiB, which
-  restores all three benchmarked lineages (Google / Meta / Microsoft). The mirror
-  cannot be exact — `phi-4` is 12.7 GiB locally and the benchmarked trio needs 31.7 GiB
-  against a 25.2 GiB budget, with no `num_ctx` or slot count that fits, since the
-  weights alone are ~28 GiB — so `phi-4` is substituted within its own family rather
-  than swapping a lab out. Use `--backend openrouter` for exact benchmark fidelity.
-
-  The panel **requires `OLLAMA_NUM_PARALLEL=2`**, stated as a requirement because KV is
-  charged `num_ctx x slots`, so parallelism is part of a panel's spec rather than
-  ambient config. Depending on it is safe only because the preflight runs before any
-  model loads: a stock 4-slot host is *refused* with a hint naming a smaller panel,
-  never panicked. Tests now pin all three properties — fits at 2 slots, still refused
-  at 4, and mirrors the benchmarked lineages.
-
 - Add an authenticated Grok CLI backend (`--backend grok`, `--frontier-backend grok`)
   for direct generation or frontier escalation. Like the Codex backend it generates in
   an isolated session — read-only sandbox, no tools, no subagents, no memory, one turn,

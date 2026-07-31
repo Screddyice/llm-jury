@@ -144,12 +144,11 @@ The Grok CLI also auto-discovers `~/.claude/agents/` and `~/.claude/skills/` thr
 with no extra install — it carries no `model:` pin, so it inherits the Grok session
 model. Verify discovery with `grok inspect`.
 
-> **Frontmatter gotcha — agents only.** Grok parses *agent* frontmatter as **strict
-> YAML**; Claude Code is lenient. An agent whose unquoted `description:` contains a
-> colon-space (`": "`) is silently dropped by Grok — it never appears in `grok inspect`
-> and cannot be spawned, with no error anywhere. Keep agent descriptions as quoted YAML
-> scalars; the shipped agent does, and a test enforces it. Grok parses **skills**
-> leniently, so skill descriptions are unaffected and need no quoting.
+> **Frontmatter gotcha.** Grok parses agent and skill frontmatter as **strict YAML**;
+> Claude Code is lenient. An unquoted `description:` containing a colon-space (`": "`)
+> is silently dropped by Grok — the agent never appears in `grok inspect` and cannot be
+> spawned, with no error anywhere. Keep descriptions as quoted YAML scalars. The shipped
+> agent and skills do, and a test enforces it.
 
 > **Model-pin gotcha.** A `model:` pin Grok cannot resolve is ignored rather than
 > rejected: the spawn succeeds and the agent runs on the session model instead. An agent
@@ -340,39 +339,8 @@ read as a separately measured benchmark result until that exact policy is reprod
 
 - **Ollama (local, free, private)** — `--backend ollama`. Pull the council first:
   ```bash
-  ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b
+  ollama pull phi4 && ollama pull gemma3:12b && ollama pull llama3.1:8b
   ```
-  The local council mirrors the lineages of the benchmarked cloud panel — Google /
-  Meta / Microsoft — so the measured numbers describe something reproducible
-  off-cloud. The mirror is not exact and cannot be: `phi-4` is 12.7 GiB locally, and
-  the benchmarked trio `phi4 + gemma3:12b + llama3.1:8b` projects 31.7 GiB against a
-  25.2 GiB budget on a 36 GiB host. No `num_ctx` or slot count fits it, since the
-  weights alone are ~28 GiB. `phi-4` is therefore substituted by `phi4-mini:3.8b`
-  from the same family, keeping all three labs on the council. **For exact benchmark
-  fidelity use `--backend openrouter`, which runs `CLOUD_PANEL` unchanged.**
-
-  The default **requires `OLLAMA_NUM_PARALLEL=2`**. KV cache is charged
-  `num_ctx x slots`, so parallelism multiplies memory for every model on the server
-  and is part of a panel's spec:
-
-  | slots | projected | 36 GiB host, budget 25.2 GiB |
-  |-------|-----------|------------------------------|
-  | 2     | 23.4 GiB  | fits                         |
-  | 4 (Ollama default) | 27.3 GiB | refused, with a hint |
-
-  Set it on the server and tell the client, then restart Ollama:
-  ```bash
-  # server: launchd plist / systemd unit
-  OLLAMA_NUM_PARALLEL=2
-  # client: or the preflight assumes 4 and over-refuses panels that would fit
-  export LLMJURY_OLLAMA_PARALLEL=2
-  ```
-  Leaving Ollama at 4 slots is safe, just smaller: the preflight runs before any
-  model loads, so you get an actionable refusal naming a smaller panel rather than a
-  host that swaps itself to death. Use
-  `--models llama3.1:8b,phi4-mini:3.8b,granite4.1:3b` (19.7 GiB at 4 slots) if you
-  would rather not tune the server. `--models` is gated by the same preflight.
-
   Pass any Ollama completion tag through `--models`, including Qwen, custom
   Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
   generation budget produces verifier-ready code. Add `--think` when you want an
@@ -411,61 +379,24 @@ that CLI — reach for them before a metered OpenRouter ladder. The named ladder
 clear error if paired with `--frontier-backend codex` or `grok`, rather than handing
 those providers a slug they cannot serve.
 
-### Fitting the council in RAM
+### Sizing a local panel
 
-A local council loads every panelist at once, and Ollama caps residency by model
-**count** (`OLLAMA_MAX_LOADED_MODELS`, default 3 on a single-GPU host), never by bytes.
-Three models is exactly a default panel, so nothing in the stack knows the aggregate.
+Nothing in this repo checks host memory before Ollama loads a panel. You own that
+check. Ollama caps residency by model count (`OLLAMA_MAX_LOADED_MODELS`, default 3)
+and never by bytes, so a three-model council can exceed physical RAM and take the
+host down with it.
 
-That matters because an over-large panel does not fail cleanly. Metal allocations are
-wired and cannot be paged out, so the host compresses and swaps everything else until
-the kernel watchdog is starved and panics. On 2026-07-31 that took a 36 GB Mac down
-twice before the cause was found: the previous default panel measured **34 GB**
-resident.
+Size against two numbers:
 
-Two rules of thumb, both measured with `ollama ps`:
+- Resident size runs about 2x on-disk size. `ollama list` reports disk, `ollama ps`
+  reports resident. Use `ollama ps`.
+- Ollama charges KV cache as `num_ctx x OLLAMA_NUM_PARALLEL`, so every extra parallel
+  slot multiplies memory for every loaded model, not just one.
 
-- Resident size is roughly **double** the on-disk size.
-- The KV cache is charged per **total** cells, meaning `num_ctx × OLLAMA_NUM_PARALLEL`.
-  A 3.4 GB model pinned to a 64k-context tag costs 7.5 GB resident, not 3.4 GB. This is
-  the trap: raising `OLLAMA_NUM_PARALLEL` for throughput multiplies KV for every model
-  on the server.
-
-`llmjury solve --backend ollama` therefore preflights the panel against physical RAM and
-**refuses** to start a run that would over-commit the host:
-
-```
-$ llmjury solve --backend ollama --models phi4,gemma3:12b,llama3.1:8b ...
-[llmjury] panel needs ~35.6 GB resident, budget is 25.2 GB
-  phi4                     ~ 14.0 GB
-  gemma3:12b               ~ 12.8 GB
-  llama3.1:8b              ~  8.8 GB
-error: this panel would over-commit the host, which can hang or panic it.
-hint: use a smaller panel, e.g. --models llama3.1:8b,gemma3:12b; lower --num-ctx;
-      set OLLAMA_NUM_PARALLEL=1 (KV is charged num_ctx x slots)
-```
-
-One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
-into the *server* process, not into the client, so the preflight cannot read it and
-assumes Ollama's default of 4. Export `LLMJURY_OLLAMA_PARALLEL` to match your server and
-the estimate stops being pessimistic:
-
-```bash
-export LLMJURY_OLLAMA_PARALLEL=2      # match OLLAMA_NUM_PARALLEL on the server
-```
-
-The budget defaults to 70% of physical RAM, since the remainder is not slack: it is the
-OS, the editor, the browser, and the agent session that launched the run. Models another
-session already has resident are counted too. Tune with `LLMJURY_MEM_FRACTION`, or relax
-the guard with `--mem-check warn` (proceed anyway) or `--mem-check off`. When the check
-cannot determine an answer, because Ollama is unreachable or RAM is unreadable, it skips
-rather than blocking: it exists to stop a known-bad run, not to invent new failures.
-
-The shipped panel is sized to fit a 36 GB host at ~19 GB and stays cross-lineage
-(Meta / Microsoft / IBM). Panel strength matters less here than it would in a voting
-council, because LLM-Jury verifies rather than votes: weaker panelists escalate to the
-frontier ladder more often instead of returning worse answers. On a larger host, pass a
-stronger panel through `--models`.
+The default council (`phi4` + `gemma3:12b` + `llama3.1:8b`) measured 34 GB resident on
+a 36 GB Mac at 4 parallel slots. If your host cannot hold that, set
+`OLLAMA_NUM_PARALLEL=2`, lower `--num-ctx`, or name a smaller panel with `--models`
+before you run a solve.
 
 ### Caching
 
@@ -528,32 +459,12 @@ llmjury solve --task task.txt --tests tests.py --entry-point solve \
 llmjury reproduce humaneval            # bundled 25-problem slice
 llmjury reproduce lcb --n 5            # quick check
 llmjury reproduce lcb --backend ollama  # run it locally
-llmjury reproduce lcb --backend ollama --num-ctx 4096   # tighter KV on a small host
 ```
 
 It runs the council on a bundled benchmark slice and reports how many problems the single best
 model solves versus what the diverse council adds on escalation — the "council adds coverage"
 story, in one command. (The bundled slices are 25 problems each; the headline 97.6% / 75.6%
 figures are the larger full runs from the write-up.)
-
-The Ollama path pins `--num-ctx` (default 8192) and runs the same RAM preflight as `solve`.
-Both matter: Ollama sizes KV as `num_ctx x OLLAMA_NUM_PARALLEL` **at load**, so inheriting a
-server default of 32k inflates every panelist by 1.6-1.9x, and a benchmark sweep is the most
-likely way to hold the whole council resident at once.
-
-Measured on a 36 GiB Mac with the shipped local panel at `OLLAMA_NUM_PARALLEL=2`:
-
-```
-llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b + phi4-mini:3.8b
-  single best model + verified best-of-4:   19/25 = 76.0%
-  + diverse council (escalation):            +0  ->  19/25 = 76.0%
-```
-
-Two honest caveats. This is the 25-problem slice, not the 45-problem run behind the headline,
-so 76.0% here and the published 75.6% are not the same measurement. And on this slice the
-council added **nothing** over the best model alone: every pass came from `gemma3:12b` at the
-`single` stage. Council escalation earns its keep on harder distributions than the bundled
-slice — treat `+0` as a property of this sample, not a refutation of the method.
 
 ## Status
 

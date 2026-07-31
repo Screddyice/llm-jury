@@ -27,12 +27,6 @@ def _read(path):
         sys.exit(f"error: cannot read {path}: {e}")
 
 
-def reproduce_default_num_ctx():
-    """Default `reproduce --num-ctx`, imported lazily so it stays defined in one place."""
-    from .benchmarks.reproduce import DEFAULT_NUM_CTX
-    return DEFAULT_NUM_CTX
-
-
 def _backend(name, num_ctx=None, think=False):
     if name == "ollama":
         from .backends import OllamaBackend
@@ -177,21 +171,6 @@ def cmd_solve(a):
             probe_best, probe_panel = default_panel(backend.name)
             probe = [probe_best] + list(probe_panel)
         probe = ([best] if best else []) + [m for m in probe if m not in route]
-        # Preflight: refuse a panel that would not fit in RAM. A council loads every
-        # panelist at once and Ollama caps residency by model count, not bytes, so an
-        # over-large panel takes the host down (wired GPU allocations cannot be paged
-        # out; the kernel watchdog panics) rather than failing in a way we could catch.
-        if a.mem_check != "off":
-            from .memguard import check as memory_check
-            report = memory_check(probe, host=backend.host, num_ctx=a.num_ctx)
-            if not report.ok:
-                sys.stderr.write("[llmjury] " + report.message() + "\n")
-                if a.mem_check == "refuse":
-                    sys.exit(
-                        "error: this panel would over-commit the host, which can hang or "
-                        f"panic it.\nhint: {report.hint()}\n"
-                        "override: --mem-check warn (proceed anyway) or off (skip the check)")
-                sys.stderr.write(f"[llmjury] proceeding anyway: {report.hint()}\n")
         for warning in baked_system_warnings(
                 probe, lambda m: show_system_chars(backend.host, m)):
             sys.stderr.write(warning + "\n")
@@ -239,7 +218,7 @@ def cmd_demo(a):
 
 def cmd_reproduce(a):
     from .benchmarks import reproduce
-    reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace, num_ctx=a.num_ctx)
+    reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace)
 
 
 def cmd_delegate(a):
@@ -341,11 +320,6 @@ def main():
                    "0 = the server's default). Ollama sizes each model's KV cache as "
                    "num_ctx x OLLAMA_NUM_PARALLEL at load, so a lean value here is what "
                    "lets the whole council decode in parallel without evictions")
-    s.add_argument("--mem-check", choices=["refuse", "warn", "off"], default="refuse",
-                   help="preflight the local panel against physical RAM, --backend ollama "
-                   "only (default refuse). A panel that does not fit does not fail "
-                   "cleanly: it over-commits unified memory and can panic the host. "
-                   "Tune the ceiling with LLMJURY_MEM_FRACTION (default 0.70)")
     s.add_argument("--think", action="store_true",
                    help="let thinking-capable Ollama models spend tokens on reasoning; "
                    "disabled by default so the verifier receives answer code")
@@ -379,10 +353,6 @@ def main():
     r.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
     r.add_argument("--pace", type=float, default=0.0,
                    help="seconds to pause between problems (duty-cycle to keep the GPU cool)")
-    r.add_argument("--num-ctx", type=int, default=reproduce_default_num_ctx(),
-                   help="Ollama context cap per request (default: 8192). Ollama sizes KV as "
-                        "num_ctx x OLLAMA_NUM_PARALLEL at load, so leaving this to the "
-                        "server default (often 32k) inflates every panelist.")
     r.set_defaults(func=cmd_reproduce)
 
     d = sub.add_parser(
