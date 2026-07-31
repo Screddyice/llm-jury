@@ -340,8 +340,39 @@ read as a separately measured benchmark result until that exact policy is reprod
 
 - **Ollama (local, free, private)** — `--backend ollama`. Pull the council first:
   ```bash
-  ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b && ollama pull granite4.1:3b
+  ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b
   ```
+  The local council mirrors the lineages of the benchmarked cloud panel — Google /
+  Meta / Microsoft — so the measured numbers describe something reproducible
+  off-cloud. The mirror is not exact and cannot be: `phi-4` is 12.7 GiB locally, and
+  the benchmarked trio `phi4 + gemma3:12b + llama3.1:8b` projects 31.7 GiB against a
+  25.2 GiB budget on a 36 GiB host. No `num_ctx` or slot count fits it, since the
+  weights alone are ~28 GiB. `phi-4` is therefore substituted by `phi4-mini:3.8b`
+  from the same family, keeping all three labs on the council. **For exact benchmark
+  fidelity use `--backend openrouter`, which runs `CLOUD_PANEL` unchanged.**
+
+  The default **requires `OLLAMA_NUM_PARALLEL=2`**. KV cache is charged
+  `num_ctx x slots`, so parallelism multiplies memory for every model on the server
+  and is part of a panel's spec:
+
+  | slots | projected | 36 GiB host, budget 25.2 GiB |
+  |-------|-----------|------------------------------|
+  | 2     | 23.4 GiB  | fits                         |
+  | 4 (Ollama default) | 27.3 GiB | refused, with a hint |
+
+  Set it on the server and tell the client, then restart Ollama:
+  ```bash
+  # server: launchd plist / systemd unit
+  OLLAMA_NUM_PARALLEL=2
+  # client: or the preflight assumes 4 and over-refuses panels that would fit
+  export LLMJURY_OLLAMA_PARALLEL=2
+  ```
+  Leaving Ollama at 4 slots is safe, just smaller: the preflight runs before any
+  model loads, so you get an actionable refusal naming a smaller panel rather than a
+  host that swaps itself to death. Use
+  `--models llama3.1:8b,phi4-mini:3.8b,granite4.1:3b` (19.7 GiB at 4 slots) if you
+  would rather not tune the server. `--models` is gated by the same preflight.
+
   Pass any Ollama completion tag through `--models`, including Qwen, custom
   Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
   generation budget produces verifier-ready code. Add `--think` when you want an
@@ -497,12 +528,32 @@ llmjury solve --task task.txt --tests tests.py --entry-point solve \
 llmjury reproduce humaneval            # bundled 25-problem slice
 llmjury reproduce lcb --n 5            # quick check
 llmjury reproduce lcb --backend ollama  # run it locally
+llmjury reproduce lcb --backend ollama --num-ctx 4096   # tighter KV on a small host
 ```
 
 It runs the council on a bundled benchmark slice and reports how many problems the single best
 model solves versus what the diverse council adds on escalation — the "council adds coverage"
 story, in one command. (The bundled slices are 25 problems each; the headline 97.6% / 75.6%
 figures are the larger full runs from the write-up.)
+
+The Ollama path pins `--num-ctx` (default 8192) and runs the same RAM preflight as `solve`.
+Both matter: Ollama sizes KV as `num_ctx x OLLAMA_NUM_PARALLEL` **at load**, so inheriting a
+server default of 32k inflates every panelist by 1.6-1.9x, and a benchmark sweep is the most
+likely way to hold the whole council resident at once.
+
+Measured on a 36 GiB Mac with the shipped local panel at `OLLAMA_NUM_PARALLEL=2`:
+
+```
+llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b + phi4-mini:3.8b
+  single best model + verified best-of-4:   19/25 = 76.0%
+  + diverse council (escalation):            +0  ->  19/25 = 76.0%
+```
+
+Two honest caveats. This is the 25-problem slice, not the 45-problem run behind the headline,
+so 76.0% here and the published 75.6% are not the same measurement. And on this slice the
+council added **nothing** over the best model alone: every pass came from `gemma3:12b` at the
+`single` stage. Council escalation earns its keep on harder distributions than the bundled
+slice — treat `+0` as a property of this sample, not a refutation of the method.
 
 ## Status
 

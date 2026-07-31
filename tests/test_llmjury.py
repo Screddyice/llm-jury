@@ -981,12 +981,77 @@ def test_memguard_refuses_the_panel_that_panicked_the_host():
         restore()
 
 
-def test_memguard_allows_the_shipped_panel_on_the_same_host():
+def test_memguard_allows_the_shipped_panel_at_its_documented_parallelism():
+    """The default panel is specified at OLLAMA_NUM_PARALLEL=2, not Ollama's stock 4.
+
+    KV is charged num_ctx x slots, so parallelism is part of a panel's spec. Pinning
+    the supported configuration here keeps the default honest about what it needs.
+    """
+    from llmjury import memguard, panels
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=2)
+        assert report.ok, f"default panel must fit a 36 GB host at 2 slots: {report.message()}"
+    finally:
+        restore()
+
+
+def test_reproduce_pins_num_ctx_on_the_ollama_backend():
+    """Leaving num_ctx unset means the SERVER's default, not a small one.
+
+    Ollama sizes KV as num_ctx x OLLAMA_NUM_PARALLEL at load. This path once passed
+    nothing, so a host tuned to 32k for coding-agent use loaded llama3.1:8b at 13.0 GB
+    and phi4-mini:3.8b at 8.9 GB against memguard estimates of 8.0 and 4.8 — 1.6-1.9x —
+    and the third panelist would have taken it past physical RAM. Benchmark prompts are
+    tiny, so the large context bought nothing.
+    """
+    from llmjury.benchmarks import reproduce
+    be = reproduce._backend("ollama")
+    assert be.num_ctx == reproduce.DEFAULT_NUM_CTX, (
+        "reproduce must pin num_ctx explicitly; None inherits the server default")
+    assert reproduce._backend("ollama", num_ctx=2048).num_ctx == 2048
+
+
+def test_local_panel_mirrors_cloud_panel_lineages():
+    """The local council is meant to be the benchmarked council, run locally.
+
+    CLOUD_PANEL is what the published numbers were measured with. LOCAL_PANEL mirrors
+    its *lineages* so those numbers describe something reproducible off-cloud. Exact
+    tags cannot match (phi-4 is 12.7 GiB locally and no 3-model panel holding it fits a
+    36 GiB host), so a panelist may be swapped for a smaller model from the SAME lab —
+    never for a different lab, which would silently drop a lineage from the council and
+    make the benchmark a weaker description of local behaviour.
+    """
+    from llmjury import panels
+    lineage = {
+        "microsoft/phi-4": "microsoft", "phi4": "microsoft", "phi4-mini:3.8b": "microsoft",
+        "google/gemma-3-12b-it": "google", "gemma3:12b": "google",
+        "meta-llama/llama-3.1-8b-instruct": "meta", "llama3.1:8b": "meta",
+        "granite4.1:3b": "ibm", "qwen3:8b": "alibaba", "qwen3.5:4b": "alibaba",
+    }
+    missing = [m for m in panels.CLOUD_PANEL + panels.LOCAL_PANEL if m not in lineage]
+    assert not missing, f"unmapped model, extend the lineage table: {missing}"
+    cloud = sorted(lineage[m] for m in panels.CLOUD_PANEL)
+    local = sorted(lineage[m] for m in panels.LOCAL_PANEL)
+    assert local == cloud, (
+        f"local council must mirror the benchmarked lineages {cloud}, got {local}. "
+        "Substitute within a lab (phi-4 -> phi4-mini), do not swap labs.")
+
+
+def test_memguard_refuses_the_shipped_panel_at_stock_parallelism():
+    """The other half of the contract: an untuned host is REFUSED, never panicked.
+
+    Requiring OLLAMA_NUM_PARALLEL=2 is only safe because the preflight runs before any
+    model loads, so a stock 4-slot host gets an actionable error naming a smaller
+    panel. If this ever starts passing, the default silently became a crash risk for
+    anyone who never tuned Ollama.
+    """
     from llmjury import memguard, panels
     restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
     try:
         report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=4)
-        assert report.ok, f"default panel must fit a 36 GB host: {report.message()}"
+        assert not report.ok, "default panel at 4 slots must refuse, not silently fit"
+        assert "smaller panel" in report.hint()
     finally:
         restore()
 
