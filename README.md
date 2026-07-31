@@ -340,7 +340,7 @@ read as a separately measured benchmark result until that exact policy is reprod
 
 - **Ollama (local, free, private)** — `--backend ollama`. Pull the council first:
   ```bash
-  ollama pull phi4 && ollama pull gemma3:12b && ollama pull llama3.1:8b
+  ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b && ollama pull granite4.1:3b
   ```
   Pass any Ollama completion tag through `--models`, including Qwen, custom
   Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
@@ -379,6 +379,62 @@ that CLI — reach for them before a metered OpenRouter ladder. The named ladder
 (`auto`, `open`, `opus`, `fable`) resolve to OpenRouter slugs and are rejected with a
 clear error if paired with `--frontier-backend codex` or `grok`, rather than handing
 those providers a slug they cannot serve.
+
+### Fitting the council in RAM
+
+A local council loads every panelist at once, and Ollama caps residency by model
+**count** (`OLLAMA_MAX_LOADED_MODELS`, default 3 on a single-GPU host), never by bytes.
+Three models is exactly a default panel, so nothing in the stack knows the aggregate.
+
+That matters because an over-large panel does not fail cleanly. Metal allocations are
+wired and cannot be paged out, so the host compresses and swaps everything else until
+the kernel watchdog is starved and panics. On 2026-07-31 that took a 36 GB Mac down
+twice before the cause was found: the previous default panel measured **34 GB**
+resident.
+
+Two rules of thumb, both measured with `ollama ps`:
+
+- Resident size is roughly **double** the on-disk size.
+- The KV cache is charged per **total** cells, meaning `num_ctx × OLLAMA_NUM_PARALLEL`.
+  A 3.4 GB model pinned to a 64k-context tag costs 7.5 GB resident, not 3.4 GB. This is
+  the trap: raising `OLLAMA_NUM_PARALLEL` for throughput multiplies KV for every model
+  on the server.
+
+`llmjury solve --backend ollama` therefore preflights the panel against physical RAM and
+**refuses** to start a run that would over-commit the host:
+
+```
+$ llmjury solve --backend ollama --models phi4,gemma3:12b,llama3.1:8b ...
+[llmjury] panel needs ~35.6 GB resident, budget is 25.2 GB
+  phi4                     ~ 14.0 GB
+  gemma3:12b               ~ 12.8 GB
+  llama3.1:8b              ~  8.8 GB
+error: this panel would over-commit the host, which can hang or panic it.
+hint: use a smaller panel, e.g. --models llama3.1:8b,gemma3:12b; lower --num-ctx;
+      set OLLAMA_NUM_PARALLEL=1 (KV is charged num_ctx x slots)
+```
+
+One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
+into the *server* process, not into the client, so the preflight cannot read it and
+assumes Ollama's default of 4. Export `LLMJURY_OLLAMA_PARALLEL` to match your server and
+the estimate stops being pessimistic:
+
+```bash
+export LLMJURY_OLLAMA_PARALLEL=2      # match OLLAMA_NUM_PARALLEL on the server
+```
+
+The budget defaults to 70% of physical RAM, since the remainder is not slack: it is the
+OS, the editor, the browser, and the agent session that launched the run. Models another
+session already has resident are counted too. Tune with `LLMJURY_MEM_FRACTION`, or relax
+the guard with `--mem-check warn` (proceed anyway) or `--mem-check off`. When the check
+cannot determine an answer, because Ollama is unreachable or RAM is unreadable, it skips
+rather than blocking: it exists to stop a known-bad run, not to invent new failures.
+
+The shipped panel is sized to fit a 36 GB host at ~19 GB and stays cross-lineage
+(Meta / Microsoft / IBM). Panel strength matters less here than it would in a voting
+council, because LLM-Jury verifies rather than votes: weaker panelists escalate to the
+frontier ladder more often instead of returning worse answers. On a larger host, pass a
+stronger panel through `--models`.
 
 ### Caching
 

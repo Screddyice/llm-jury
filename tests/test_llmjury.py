@@ -927,6 +927,124 @@ def test_grok_agent_frontmatter_description_is_quoted_for_strict_yaml():
             "will silently drop the agent")
 
 
+# --- memory preflight -------------------------------------------------------------
+#
+# Resident size measured with `ollama ps` on a 36 GB M-series Mac at num_ctx 8192 x
+# OLLAMA_NUM_PARALLEL 4 (32768 KV cells). (tag, disk GB, resident GB).
+MEASURED = [
+    ("granite4.1:3b", 2.1, 4.6),
+    ("phi4-mini:3.8b", 2.5, 5.7),
+    ("qwen3.5:4b", 3.4, 5.9),
+    ("llama3.1:8b", 4.9, 9.0),
+    ("qwen3:8b", 5.2, 7.9),
+    ("gemma3:12b", 8.1, 11.0),
+    ("phi4", 9.1, 14.0),
+]
+HOST_36GB = 38654705664          # hw.memsize on the machine that panicked
+
+
+def _fake_ollama(monkeypatched, sizes_gb, loaded=None):
+    """Point memguard at a synthetic host. Returns a restore callable."""
+    from llmjury import memguard
+    saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes)
+    loaded = loaded or {}
+    memguard.disk_sizes = lambda host: {t: int(g * 1e9) for t, g in sizes_gb.items()}
+    memguard.loaded_bytes = lambda host: (sum(loaded.values()), dict(loaded))
+    memguard.total_ram_bytes = lambda: monkeypatched
+
+    def restore():
+        memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes = saved
+    return restore
+
+
+def test_memguard_never_underestimates_measured_resident():
+    """Over-estimating wastes a run; under-estimating panics the host."""
+    from llmjury import memguard
+    cells = 8192 * 4
+    for tag, disk_gb, resident_gb in MEASURED:
+        estimate = memguard.estimate_resident(int(disk_gb * 1e9), cells)
+        assert estimate >= resident_gb * 1e9, (
+            f"{tag}: estimated {estimate / 1e9:.1f} GB < measured {resident_gb} GB")
+
+
+def test_memguard_refuses_the_panel_that_panicked_the_host():
+    """Regression for 2026-07-31: phi4 + gemma3:12b + llama3.1:8b on a 36 GB Mac."""
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        report = memguard.check(["phi4", "gemma3:12b", "llama3.1:8b"],
+                                num_ctx=8192, parallel=4)
+        assert not report.ok, "the panel that took the machine down must be refused"
+        assert report.projected > report.budget
+        assert "smaller panel" in report.hint()
+    finally:
+        restore()
+
+
+def test_memguard_allows_the_shipped_panel_on_the_same_host():
+    from llmjury import memguard, panels
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=4)
+        assert report.ok, f"default panel must fit a 36 GB host: {report.message()}"
+    finally:
+        restore()
+
+
+def test_memguard_counts_kv_per_parallel_slot():
+    """KV is charged num_ctx x slots, which is what made a '3 GB' model cost 7.5 GB."""
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        one = memguard.check(["llama3.1:8b"], num_ctx=8192, parallel=1)
+        four = memguard.check(["llama3.1:8b"], num_ctx=8192, parallel=4)
+        assert four.projected > one.projected
+    finally:
+        restore()
+
+
+def test_memguard_charges_models_already_resident():
+    """A model another session is holding is still occupying the same RAM."""
+    from llmjury import memguard
+    sizes = {t: g for t, g, _ in MEASURED}
+    restore = _fake_ollama(HOST_36GB, sizes, loaded={"qwen3.5:4b-64k": int(7.5e9)})
+    try:
+        report = memguard.check(["llama3.1:8b"], num_ctx=8192, parallel=4)
+        assert report.resident == int(7.5e9)
+        assert report.projected > memguard.estimate_resident(int(4.9e9), 8192 * 4)
+        assert "unload" in report.hint()
+    finally:
+        restore()
+
+
+def test_memguard_counts_a_repeated_tag_once():
+    """cli builds the probe as [best] + panel, and best is usually in the panel."""
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        once = memguard.check(["phi4", "gemma3:12b"], num_ctx=8192, parallel=4)
+        twice = memguard.check(["phi4", "phi4", "gemma3:12b"], num_ctx=8192, parallel=4)
+        assert once.projected == twice.projected, "Ollama loads a repeated tag once"
+        assert len(twice.per_model) == 2
+    finally:
+        restore()
+
+
+def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
+    """The guard exists to stop a known-bad run, not to invent new failures."""
+    from llmjury import memguard
+    saved = (memguard.disk_sizes, memguard.total_ram_bytes)
+    try:
+        memguard.total_ram_bytes = lambda: 0
+        assert memguard.check(["phi4"]).ok
+        memguard.total_ram_bytes = lambda: HOST_36GB
+        memguard.disk_sizes = lambda host: None          # ollama unreachable
+        report = memguard.check(["phi4"])
+        assert report.ok and report.skipped
+    finally:
+        memguard.disk_sizes, memguard.total_ram_bytes = saved
+
+
 if __name__ == "__main__":
     tests = sorted((k, v) for k, v in globals().items()
                    if k.startswith("test_") and callable(v))
