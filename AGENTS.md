@@ -67,10 +67,14 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
   contains a colon-space; Claude Code tolerates it, so the breakage is invisible without
   `grok inspect`. A test enforces the quoting. Skill frontmatter is parsed leniently by
   Grok and needs no quoting — the rule is agents only.
-- The shipped agent must stay free of a `model:` pin. Hosts differ in how they treat a
-  pin they cannot resolve: sessions on the official Anthropic API fail the spawn, while
-  Grok ignores the pin and runs the agent on its session model. An unpinned agent is
-  correct everywhere; a pinned one is silently wrong somewhere.
+- The shipped agent must stay free of a `model:` pin. Hosts disagree about a pin they
+  cannot resolve, and at least one of them fails silently. Verified here: Grok ignores
+  the pin and runs the agent on its own session model, so an agent pinned to a local
+  model quietly executes on a cloud one. Reported separately, though not re-verified in
+  this repo: sessions pinned to the official Anthropic API (the Claude desktop app,
+  cron) reject the unknown model outright. Either way an unpinned agent is correct
+  everywhere, while a pinned one is wrong somewhere — and possibly wrong without saying
+  so, which is the case worth designing against.
 - OpenRouter is a model-agnostic cloud provider. The backend must stay model-agnostic:
   no Anthropic-specific request shapes, response parsing, or auth paths. Model choice
   is policy, expressed as data in `llmjury.panels`, never wired into transport code.
