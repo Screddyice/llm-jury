@@ -27,6 +27,12 @@ def _read(path):
         sys.exit(f"error: cannot read {path}: {e}")
 
 
+def reproduce_default_num_ctx():
+    """Default `reproduce --num-ctx`, imported lazily so it stays defined in one place."""
+    from .benchmarks.reproduce import DEFAULT_NUM_CTX
+    return DEFAULT_NUM_CTX
+
+
 def _backend(name, num_ctx=None, think=False):
     if name == "ollama":
         from .backends import OllamaBackend
@@ -233,7 +239,7 @@ def cmd_demo(a):
 
 def cmd_reproduce(a):
     from .benchmarks import reproduce
-    reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace)
+    reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace, num_ctx=a.num_ctx)
 
 
 def cmd_delegate(a):
@@ -373,6 +379,10 @@ def main():
     r.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
     r.add_argument("--pace", type=float, default=0.0,
                    help="seconds to pause between problems (duty-cycle to keep the GPU cool)")
+    r.add_argument("--num-ctx", type=int, default=reproduce_default_num_ctx(),
+                   help="Ollama context cap per request (default: 8192). Ollama sizes KV as "
+                        "num_ctx x OLLAMA_NUM_PARALLEL at load, so leaving this to the "
+                        "server default (often 32k) inflates every panelist.")
     r.set_defaults(func=cmd_reproduce)
 
     d = sub.add_parser(

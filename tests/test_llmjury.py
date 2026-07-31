@@ -996,6 +996,22 @@ def test_memguard_allows_the_shipped_panel_at_its_documented_parallelism():
         restore()
 
 
+def test_reproduce_pins_num_ctx_on_the_ollama_backend():
+    """Leaving num_ctx unset means the SERVER's default, not a small one.
+
+    Ollama sizes KV as num_ctx x OLLAMA_NUM_PARALLEL at load. This path once passed
+    nothing, so a host tuned to 32k for coding-agent use loaded llama3.1:8b at 13.0 GB
+    and phi4-mini:3.8b at 8.9 GB against memguard estimates of 8.0 and 4.8 — 1.6-1.9x —
+    and the third panelist would have taken it past physical RAM. Benchmark prompts are
+    tiny, so the large context bought nothing.
+    """
+    from llmjury.benchmarks import reproduce
+    be = reproduce._backend("ollama")
+    assert be.num_ctx == reproduce.DEFAULT_NUM_CTX, (
+        "reproduce must pin num_ctx explicitly; None inherits the server default")
+    assert reproduce._backend("ollama", num_ctx=2048).num_ctx == 2048
+
+
 def test_local_panel_mirrors_cloud_panel_lineages():
     """The local council is meant to be the benchmarked council, run locally.
 
