@@ -340,8 +340,30 @@ read as a separately measured benchmark result until that exact policy is reprod
 
 - **Ollama (local, free, private)** — `--backend ollama`. Pull the council first:
   ```bash
-  ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b && ollama pull granite4.1:3b
+  ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull granite4.1:3b
   ```
+  The default panel is cross-lineage (Google / Meta / IBM) and **requires
+  `OLLAMA_NUM_PARALLEL=2`**. KV cache is charged `num_ctx x slots`, so parallelism
+  multiplies memory for every model on the server and is part of a panel's spec:
+
+  | slots | projected | 36 GiB host, budget 25.2 GiB |
+  |-------|-----------|------------------------------|
+  | 2     | 23.0 GiB  | fits                         |
+  | 4 (Ollama default) | 26.8 GiB | refused, with a hint |
+
+  Set it on the server and tell the client, then restart Ollama:
+  ```bash
+  # server: launchd plist / systemd unit
+  OLLAMA_NUM_PARALLEL=2
+  # client: or the preflight assumes 4 and over-refuses panels that would fit
+  export LLMJURY_OLLAMA_PARALLEL=2
+  ```
+  Leaving Ollama at 4 slots is safe, just smaller: the preflight runs before any
+  model loads, so you get an actionable refusal naming a smaller panel rather than a
+  host that swaps itself to death. Drop `granite4.1:3b`, or use
+  `--models llama3.1:8b,phi4-mini:3.8b,granite4.1:3b` (19.7 GiB at 4 slots) if you
+  would rather not tune the server. `--models` is gated by the same preflight.
+
   Pass any Ollama completion tag through `--models`, including Qwen, custom
   Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
   generation budget produces verifier-ready code. Add `--think` when you want an

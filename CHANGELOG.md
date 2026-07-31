@@ -16,6 +16,16 @@
   LLM-Jury verifies rather than votes, weaker panelists escalate more often rather than
   returning worse answers, so this trades escalation spend for host stability. Pass
   `--models` to restore a larger panel on a larger host.
+- **Restore a 12B panelist now that the ceiling is enforced.** The resize above was
+  measured against Ollama's stock 4 parallel slots and, at ~19.7 GiB, left roughly a
+  fifth of the budget unused. The default is now
+  `gemma3:12b + llama3.1:8b + granite4.1:3b` (Google / Meta / IBM) at 23.0 GiB, which
+  **requires `OLLAMA_NUM_PARALLEL=2`** — stated as a requirement because KV is charged
+  `num_ctx x slots`, so parallelism is part of a panel's spec rather than ambient
+  config. Depending on it is safe only because the preflight runs before any model
+  loads: a stock 4-slot host is *refused* with a hint naming a smaller panel, never
+  panicked. Both halves are pinned by tests, so the default cannot silently become a
+  crash risk for an untuned host.
 
 - Add an authenticated Grok CLI backend (`--backend grok`, `--frontier-backend grok`)
   for direct generation or frontier escalation. Like the Codex backend it generates in

@@ -981,12 +981,35 @@ def test_memguard_refuses_the_panel_that_panicked_the_host():
         restore()
 
 
-def test_memguard_allows_the_shipped_panel_on_the_same_host():
+def test_memguard_allows_the_shipped_panel_at_its_documented_parallelism():
+    """The default panel is specified at OLLAMA_NUM_PARALLEL=2, not Ollama's stock 4.
+
+    KV is charged num_ctx x slots, so parallelism is part of a panel's spec. Pinning
+    the supported configuration here keeps the default honest about what it needs.
+    """
+    from llmjury import memguard, panels
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=2)
+        assert report.ok, f"default panel must fit a 36 GB host at 2 slots: {report.message()}"
+    finally:
+        restore()
+
+
+def test_memguard_refuses_the_shipped_panel_at_stock_parallelism():
+    """The other half of the contract: an untuned host is REFUSED, never panicked.
+
+    Requiring OLLAMA_NUM_PARALLEL=2 is only safe because the preflight runs before any
+    model loads, so a stock 4-slot host gets an actionable error naming a smaller
+    panel. If this ever starts passing, the default silently became a crash risk for
+    anyone who never tuned Ollama.
+    """
     from llmjury import memguard, panels
     restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
     try:
         report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=4)
-        assert report.ok, f"default panel must fit a 36 GB host: {report.message()}"
+        assert not report.ok, "default panel at 4 slots must refuse, not silently fit"
+        assert "smaller panel" in report.hint()
     finally:
         restore()
 

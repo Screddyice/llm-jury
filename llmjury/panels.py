@@ -10,21 +10,40 @@ CLOUD_PANEL = ["microsoft/phi-4", "google/gemma-3-12b-it", "meta-llama/llama-3.1
 CLOUD_BEST = "microsoft/phi-4"
 
 # Local (Ollama tags) — pull with:
-#   ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b && ollama pull granite4.1:3b
+#   ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull granite4.1:3b
 #
-# Sized to fit a 36 GB host, still cross-lineage (Meta / Microsoft / IBM). The panel
-# used to be phi4 + gemma3:12b + llama3.1:8b, which measured 34 GB resident when
-# loaded concurrently — more than the 36 GB machine it ran on, and well past the
-# ~28 GB Ollama budgets for models. That over-commit panicked the host twice on
-# 2026-07-31 before the cause was understood. This panel measures ~19 GB.
+# Cross-lineage (Google / Meta / IBM). REQUIRES OLLAMA_NUM_PARALLEL=2, which is a
+# documented, enforced requirement rather than an assumption — see below.
 #
-# Panel strength matters less here than it would in a voting council: llm-jury
-# verifies rather than votes, so weaker panelists escalate to the frontier ladder
-# more often instead of returning worse answers. Trading local capability for
-# stability costs escalation spend, not correctness. See llmjury/memguard.py for the
-# measurements and the preflight that now refuses a panel that will not fit.
-LOCAL_PANEL = ["llama3.1:8b", "phi4-mini:3.8b", "granite4.1:3b"]
-LOCAL_BEST = "llama3.1:8b"
+#   36 GiB host, budget 25.2 GiB (70% of RAM)
+#     2 slots -> 23.0 GiB  fits
+#     4 slots -> 26.8 GiB  refused by memguard, with a hint
+#
+# KV is charged num_ctx x slots, so parallelism multiplies memory for every model on
+# the server. Ollama ships 4 slots; this panel needs 2. That requirement is safe to
+# take because it degrades into a *refusal*, not a crash: memguard.check() runs before
+# any model loads, so an untuned host gets an actionable error naming the smaller
+# panel, never a kernel panic. test_memguard_* pins both halves of that contract.
+#
+# History, because this line has been wrong in both directions. It was
+# phi4 + gemma3:12b + llama3.1:8b, which projects 35.6 GiB at 4 slots — essentially
+# the whole machine. It survived on timing rather than headroom, since the three were
+# rarely all resident at once. On 2026-07-31 two unrelated changes consumed the
+# remaining slack (a diff-review hook pinned resident, and a second CLI firing that
+# same hook) and the host kernel-panicked. The immediate fix then over-corrected to
+# llama3.1:8b + phi4-mini:3.8b + granite4.1:3b at 19.7 GiB, giving up the only 12B
+# panelist and leaving ~5 GiB of budget unused.
+#
+# phi4 is what cannot come back: 12.7 GiB alone, so no 3-model panel holding it fits
+# at any parallelism worth running.
+#
+# Panel strength is not free but it is not decisive either: llm-jury verifies rather
+# than votes, so a weaker panelist escalates to the frontier ladder more often instead
+# of returning a worse answer. That trade costs escalation spend, not correctness —
+# which is why fitting the host is the constraint and maximising within it is the
+# objective. Per-run overrides go through `--models`, gated by the same preflight.
+LOCAL_PANEL = ["gemma3:12b", "llama3.1:8b", "granite4.1:3b"]
+LOCAL_BEST = "gemma3:12b"
 
 # Codex is a single frontier provider, not a diverse council by itself. Use it as
 # the final tier after the local council, or sample it best-of-k directly.
