@@ -2,20 +2,6 @@
 
 ## Unreleased
 
-- Add an authenticated Grok CLI backend (`--backend grok`, `--frontier-backend grok`)
-  for direct generation or frontier escalation. Like the Codex backend it generates in
-  an isolated session — read-only sandbox, no tools, no subagents, no memory, one turn,
-  empty temp cwd — and authenticates from the Grok CLI's own session, so escalation
-  costs nothing beyond an existing Grok subscription and needs no `XAI_API_KEY`. The
-  model default is `grok-4.5`, overridable via `LLMJURY_GROK_MODEL`.
-- Add `llmjury install-grok`, which installs an idempotent `llm-jury-orchestrate` skill
-  into `~/.grok/skills/` (honouring `GROK_HOME`) so the Grok CLI drives verified jury
-  runs and prefers subscription-auth escalation over metered OpenRouter spend.
-- Quote the `description:` frontmatter of the shipped Claude agent and skills. The Grok
-  CLI parses frontmatter as strict YAML and **silently drops** any file whose unquoted
-  description contains a colon-space — the agent simply never appears in `grok inspect`.
-  Claude Code is lenient, so this was invisible from that side; a test now enforces it.
-
 - `solve --backend ollama` now preflights the panel with Ollama `/api/show` and warns
   when a tag has a large SYSTEM prompt baked into its Modelfile: jury prompts are bare
   user messages at a lean num_ctx, so a baked system slows every prefill and gets

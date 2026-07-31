@@ -81,11 +81,6 @@ llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-
 # Codex as the generation provider for every tier (single model, best-of-k).
 llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-point add \
     --backend codex --models gpt-5.6-sol
-
-# Grok-native hybrid: local council first, then the authenticated Grok CLI.
-# No xAI API key is required; this reuses the Grok CLI's own session auth.
-llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-point add \
-    --backend ollama --frontier grok-4.5 --frontier-backend grok
 ```
 
 `--tests` accepts Python only: either a complete `check(candidate)` function or its
@@ -128,34 +123,9 @@ assists only on code units with a trustworthy oracle.
 ```bash
 llmjury install-claude
 llmjury install-codex
-llmjury install-grok     # Grok CLI (Grok Build TUI)
 ```
 
-Restart Claude Code, Codex, and Grok after the first install so each discovers its skill.
-
-### Starting in the Grok CLI
-
-`install-grok` writes an `llm-jury-orchestrate` skill to `~/.grok/skills/` (honouring
-`GROK_HOME`), the Grok counterpart of `install-codex`. Grok stays the implementation
-agent; the local council proposes code and the verifier decides what Grok may use.
-
-The Grok CLI also auto-discovers `~/.claude/agents/` and `~/.claude/skills/` through its
-`[compat.claude]` settings, so the `llm-jury-fusion` agent works inside a Grok session
-with no extra install — it carries no `model:` pin, so it inherits the Grok session
-model. Verify discovery with `grok inspect`.
-
-> **Frontmatter gotcha.** Grok parses agent and skill frontmatter as **strict YAML**;
-> Claude Code is lenient. An unquoted `description:` containing a colon-space (`": "`)
-> is silently dropped by Grok — the agent never appears in `grok inspect` and cannot be
-> spawned, with no error anywhere. Keep descriptions as quoted YAML scalars. The shipped
-> agent and skills do, and a test enforces it.
-
-> **Model-pin gotcha.** A `model:` pin Grok cannot resolve is ignored rather than
-> rejected: the spawn succeeds and the agent runs on the session model instead. An agent
-> pinned to a local model therefore runs on a cloud one in Grok, silently, which is why
-> `llm-jury-fusion` ships with no `model:` pin at all. If you keep locally-pinned agents
-> in `~/.claude/agents/`, disable them for Grok with `[subagents.toggle]` in
-> `~/.grok/config.toml`. Note `grok inspect` lists discovered agents, not spawnable ones.
+Restart Claude Code and Codex after the first install so each discovers its skill.
 
 ```text
 Start in Claude:  Claude plan → Codex execute ─┐
@@ -357,27 +327,10 @@ read as a separately measured benchmark result until that exact policy is reprod
   Jury calls default to low reasoning effort because the independent verifier supplies
   the acceptance gate; Python callers can override `CodexBackend(reasoning_effort=...)`.
 
-- **Grok CLI (authenticated xAI provider)** — `--backend grok`, or use
-  `--frontier-backend grok` after a local council. It runs headless `grok -p` sessions
-  with no tools, no subagents, no memory, and a single turn, in an empty temp directory,
-  so the model never sees the repository or its instructions. Auth is the Grok CLI's own
-  session, so **no `XAI_API_KEY` is needed and escalation costs nothing beyond the
-  existing Grok subscription**. The default model is `grok-4.5`; set `LLMJURY_GROK_MODEL`
-  to change that default, or override per invocation with `--models` or `--frontier`.
-  Jury calls default to low reasoning effort, as with Codex.
-
 The frontier provider is explicit. `--frontier-backend openrouter` accepts OpenRouter
 slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a model
-available to the installed Codex CLI and uses Codex authentication; `--frontier-backend
-grok` does the same for the Grok CLI. OpenRouter is not coupled to Anthropic: any
-compatible OpenRouter model slug can be used.
-
-Because Codex and Grok escalate on their own subscription auth rather than per-token
-billing, they are the cheapest escalation available when you are already working inside
-that CLI — reach for them before a metered OpenRouter ladder. The named ladders below
-(`auto`, `open`, `opus`, `fable`) resolve to OpenRouter slugs and are rejected with a
-clear error if paired with `--frontier-backend codex` or `grok`, rather than handing
-those providers a slug they cannot serve.
+available to the installed Codex CLI and uses Codex authentication. OpenRouter is not
+coupled to Anthropic: any compatible OpenRouter model slug can be used.
 
 ### Sizing a local panel
 

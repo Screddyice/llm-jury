@@ -8,7 +8,7 @@ from pathlib import Path
 SKILL = """\
 ---
 name: llm-jury-delegate
-description: "Delegate bounded implementation and execution tasks from Claude Code to Codex while keeping local Ollama models verifier-gated for testable code units."
+description: Delegate bounded implementation and execution tasks from Claude Code to Codex while keeping local Ollama models verifier-gated for testable code units.
 ---
 
 # LLM-Jury Delegation
@@ -44,7 +44,7 @@ and the repository instructions.
 AGENT = """\
 ---
 name: llm-jury-fusion
-description: "Produces a COUNCIL-VERIFIED answer to a verifiable coding subtask by driving `llmjury solve` (local Ollama council, real verifier, optional frontier escalation) through Bash. Inherits the session model, so it works in every Claude Code session type — terminal, desktop app, cron — with no dependency on a local model router or custom base URL. Use ONLY when the task admits a mechanical oracle: a function with defined input→output, an algorithmic problem, or a bugfix a test reproduces. NOT for design, refactors, exploration, or prose — without a checkable answer the jury adds nothing."
+description: Produces a COUNCIL-VERIFIED answer to a verifiable coding subtask by driving `llmjury solve` (local Ollama council, real verifier, optional frontier escalation) through Bash. Inherits the session model, so it works in every Claude Code session type — terminal, desktop app, cron — with no dependency on a local model router or custom base URL. Use ONLY when the task admits a mechanical oracle: a function with defined input→output, an algorithmic problem, or a bugfix a test reproduces. NOT for design, refactors, exploration, or prose — without a checkable answer the jury adds nothing.
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
