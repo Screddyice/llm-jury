@@ -221,8 +221,17 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
 
     resident_total, resident_by_model = loaded_bytes(host)
 
-    per_model, unknown, need = [], [], 0
+    # Callers assemble the probe list as [best] + panel, and `best` is normally a
+    # member of the panel, so the same tag arrives twice. Ollama loads it once;
+    # counting it twice would over-refuse a panel that actually fits.
+    seen, unique = set(), []
     for tag in models:
+        if tag not in seen:
+            seen.add(tag)
+            unique.append(tag)
+
+    per_model, unknown, need = [], [], 0
+    for tag in unique:
         canonical = _canonical(tag, sizes)
         if canonical is None:
             unknown.append(tag)

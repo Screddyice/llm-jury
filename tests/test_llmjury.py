@@ -1017,6 +1017,19 @@ def test_memguard_charges_models_already_resident():
         restore()
 
 
+def test_memguard_counts_a_repeated_tag_once():
+    """cli builds the probe as [best] + panel, and best is usually in the panel."""
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        once = memguard.check(["phi4", "gemma3:12b"], num_ctx=8192, parallel=4)
+        twice = memguard.check(["phi4", "phi4", "gemma3:12b"], num_ctx=8192, parallel=4)
+        assert once.projected == twice.projected, "Ollama loads a repeated tag once"
+        assert len(twice.per_model) == 2
+    finally:
+        restore()
+
+
 def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
     """The guard exists to stop a known-bad run, not to invent new failures."""
     from llmjury import memguard
