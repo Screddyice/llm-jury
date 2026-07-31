@@ -9,9 +9,22 @@ import os
 CLOUD_PANEL = ["microsoft/phi-4", "google/gemma-3-12b-it", "meta-llama/llama-3.1-8b-instruct"]
 CLOUD_BEST = "microsoft/phi-4"
 
-# Local (Ollama tags) — pull with: ollama pull phi4 && ollama pull gemma3:12b && ollama pull llama3.1:8b
-LOCAL_PANEL = ["phi4", "gemma3:12b", "llama3.1:8b"]
-LOCAL_BEST = "phi4"
+# Local (Ollama tags) — pull with:
+#   ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b && ollama pull granite4.1:3b
+#
+# Sized to fit a 36 GB host, still cross-lineage (Meta / Microsoft / IBM). The panel
+# used to be phi4 + gemma3:12b + llama3.1:8b, which measured 34 GB resident when
+# loaded concurrently — more than the 36 GB machine it ran on, and well past the
+# ~28 GB Ollama budgets for models. That over-commit panicked the host twice on
+# 2026-07-31 before the cause was understood. This panel measures ~19 GB.
+#
+# Panel strength matters less here than it would in a voting council: llm-jury
+# verifies rather than votes, so weaker panelists escalate to the frontier ladder
+# more often instead of returning worse answers. Trading local capability for
+# stability costs escalation spend, not correctness. See llmjury/memguard.py for the
+# measurements and the preflight that now refuses a panel that will not fit.
+LOCAL_PANEL = ["llama3.1:8b", "phi4-mini:3.8b", "granite4.1:3b"]
+LOCAL_BEST = "llama3.1:8b"
 
 # Codex is a single frontier provider, not a diverse council by itself. Use it as
 # the final tier after the local council, or sample it best-of-k directly.

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Refuse local panels that do not fit in RAM.** A council loads every panelist at
+  once, but Ollama caps residency by model count (default 3, exactly a panel), never by
+  bytes, so nothing knew the aggregate. The previous default panel measured 34 GB
+  resident on a 36 GB host and panicked it twice on 2026-07-31: wired GPU allocations
+  cannot be paged out, so the machine starves its kernel watchdog instead of raising an
+  out-of-memory error a caller could catch. `llmjury solve --backend ollama` now
+  preflights the panel against physical RAM and exits with the arithmetic and a
+  remediation hint. Budget defaults to 70% of RAM (`LLMJURY_MEM_FRACTION`); relax with
+  `--mem-check warn|off`. The check skips rather than blocking when it cannot tell.
+- **Resize the default local panel** from `phi4 + gemma3:12b + llama3.1:8b` (34 GB) to
+  `llama3.1:8b + phi4-mini:3.8b + granite4.1:3b` (~19 GB), still cross-lineage. Because
+  LLM-Jury verifies rather than votes, weaker panelists escalate more often rather than
+  returning worse answers, so this trades escalation spend for host stability. Pass
+  `--models` to restore a larger panel on a larger host.
+
 - Add an authenticated Grok CLI backend (`--backend grok`, `--frontier-backend grok`)
   for direct generation or frontier escalation. Like the Codex backend it generates in
   an isolated session — read-only sandbox, no tools, no subagents, no memory, one turn,
