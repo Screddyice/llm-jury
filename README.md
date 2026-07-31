@@ -144,11 +144,12 @@ The Grok CLI also auto-discovers `~/.claude/agents/` and `~/.claude/skills/` thr
 with no extra install — it carries no `model:` pin, so it inherits the Grok session
 model. Verify discovery with `grok inspect`.
 
-> **Frontmatter gotcha.** Grok parses agent and skill frontmatter as **strict YAML**;
-> Claude Code is lenient. An unquoted `description:` containing a colon-space (`": "`)
-> is silently dropped by Grok — the agent never appears in `grok inspect` and cannot be
-> spawned, with no error anywhere. Keep descriptions as quoted YAML scalars. The shipped
-> agent and skills do, and a test enforces it.
+> **Frontmatter gotcha — agents only.** Grok parses *agent* frontmatter as **strict
+> YAML**; Claude Code is lenient. An agent whose unquoted `description:` contains a
+> colon-space (`": "`) is silently dropped by Grok — it never appears in `grok inspect`
+> and cannot be spawned, with no error anywhere. Keep agent descriptions as quoted YAML
+> scalars; the shipped agent does, and a test enforces it. Grok parses **skills**
+> leniently, so skill descriptions are unaffected and need no quoting.
 
 > **Model-pin gotcha.** A `model:` pin Grok cannot resolve is ignored rather than
 > rejected: the spawn succeeds and the agent runs on the session model instead. An agent

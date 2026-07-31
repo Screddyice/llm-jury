@@ -62,10 +62,11 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
   authenticate from their own session, so escalating to them spends no metered credit —
   inside those CLIs, prefer them over an OpenRouter ladder. Named ladders resolve to
   OpenRouter slugs and must keep rejecting `--frontier-backend codex`/`grok`.
-- Agent and skill frontmatter must keep `description:` a quoted YAML scalar. Grok parses
-  frontmatter as strict YAML and silently drops any file whose unquoted description
+- Agent frontmatter must keep `description:` a quoted YAML scalar. Grok parses *agent*
+  frontmatter as strict YAML and silently drops any agent whose unquoted description
   contains a colon-space; Claude Code tolerates it, so the breakage is invisible without
-  `grok inspect`. A test enforces the quoting.
+  `grok inspect`. A test enforces the quoting. Skill frontmatter is parsed leniently by
+  Grok and needs no quoting — the rule is agents only.
 - The shipped agent must stay free of a `model:` pin. Hosts differ in how they treat a
   pin they cannot resolve: sessions on the official Anthropic API fail the spawn, while
   Grok ignores the pin and runs the agent on its session model. An unpinned agent is
