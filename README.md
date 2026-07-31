@@ -454,12 +454,36 @@ the estimate stops being pessimistic:
 export LLMJURY_OLLAMA_PARALLEL=2      # match OLLAMA_NUM_PARALLEL on the server
 ```
 
-The budget defaults to 70% of physical RAM, since the remainder is not slack: it is the
-OS, the editor, the browser, and the agent session that launched the run. Models another
-session already has resident are counted too. Tune with `LLMJURY_MEM_FRACTION`, or relax
-the guard with `--mem-check warn` (proceed anyway) or `--mem-check off`. When the check
-cannot determine an answer, because Ollama is unreachable or RAM is unreadable, it skips
-rather than blocking: it exists to stop a known-bad run, not to invent new failures.
+The budget is the smaller of two bounds:
+
+- **70% of physical RAM** — the remainder is not slack; it is the OS, the editor, the
+  browser, and the agent session that launched the run. Tune with `LLMJURY_MEM_FRACTION`.
+- **85% of the RAM that is free right now**, plus whatever Ollama already holds (models
+  it has resident do not show up as free, but that space is available to them). Tune with
+  `LLMJURY_AVAIL_HEADROOM`.
+
+The second bound exists because the first one describes the *machine* and not the
+*moment*. A fraction of physical RAM cannot see a desktop app, a simulator, a browser, or
+a hook-driven process storm, so on a busy host it will happily approve a panel that does
+not fit. On 2026-07-31 that is exactly what happened here: 20.8 GB was held outside
+Ollama, leaving 15.2 GB free, and the guard still approved a 23.5 GB council because
+23.5 ≤ 25.2. The 8.3 GB over-commit exhausted the compressor's *segment* limit — its
+compressed *pages* were only at 38% — which starved `watchdogd` past its 90-second
+deadline and panicked the host, 23 minutes after the preflight had shipped.
+
+When free RAM is the binding constraint the error says so, so you can tell "this panel is
+too big for this machine" from "close something and retry":
+
+```
+[llmjury] panel needs ~23.5 GB resident, budget is 10.4 GB (limited by free RAM, not total)
+  free RAM right now       ~ 12.3 GB
+  gemma3:12b               ~ 11.5 GB
+hint: ... or free memory -- this panel fits the host's RAM but not what is free right now
+```
+
+Relax the guard with `--mem-check warn` (proceed anyway) or `--mem-check off`. When the
+check cannot determine an answer, because Ollama is unreachable or RAM is unreadable, it
+skips rather than blocking: it exists to stop a known-bad run, not to invent new failures.
 
 The shipped panel is sized to fit a 36 GB host at ~19 GB and stays cross-lineage
 (Meta / Microsoft / IBM). Panel strength matters less here than it would in a voting

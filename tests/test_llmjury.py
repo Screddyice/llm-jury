@@ -941,19 +941,28 @@ MEASURED = [
     ("phi4", 9.1, 14.0),
 ]
 HOST_36GB = 38654705664          # hw.memsize on the machine that panicked
+GIB = 1024 ** 3
 
 
-def _fake_ollama(monkeypatched, sizes_gb, loaded=None):
-    """Point memguard at a synthetic host. Returns a restore callable."""
+def _fake_ollama(monkeypatched, sizes_gb, loaded=None, available=None):
+    """Point memguard at a synthetic host. Returns a restore callable.
+
+    ``available`` defaults to the whole machine, i.e. an otherwise-idle host. Pass
+    a smaller value to model a host that is already busy with non-Ollama work.
+    """
     from llmjury import memguard
-    saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes)
+    saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
+             memguard.available_ram_bytes)
     loaded = loaded or {}
     memguard.disk_sizes = lambda host: {t: int(g * 1e9) for t, g in sizes_gb.items()}
     memguard.loaded_bytes = lambda host: (sum(loaded.values()), dict(loaded))
     memguard.total_ram_bytes = lambda: monkeypatched
+    memguard.available_ram_bytes = (
+        lambda: monkeypatched if available is None else available)
 
     def restore():
-        memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes = saved
+        (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
+         memguard.available_ram_bytes) = saved
     return restore
 
 
@@ -992,6 +1001,88 @@ def test_memguard_allows_the_shipped_panel_at_its_documented_parallelism():
     try:
         report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=2)
         assert report.ok, f"default panel must fit a 36 GB host at 2 slots: {report.message()}"
+    finally:
+        restore()
+
+
+def test_memguard_refuses_a_panel_that_fits_total_ram_but_not_free_ram():
+    """Regression for the 2026-07-31 panics that survived the first RAM fix.
+
+    memguard sized the council against ``total_ram x 0.70`` and the only other
+    memory it could see was OTHER OLLAMA MODELS. Everything else on the box was
+    invisible. That night ~20.8 GB was held by non-Ollama work (Claude desktop,
+    iOS simulators, and a bun/node hook storm from the Grok + claude-mem wiring),
+    leaving 15.2 GB free -- but the guard still approved a 23.5 GB council because
+    23.5 <= 25.2. The resulting over-commit exhausted the compressor's SEGMENT
+    limit (pages were only 38% of their limit), starved watchdogd, and panicked the
+    host 23 minutes after the previous fix landed.
+
+    A guard that only knows physical RAM cannot protect a machine that is doing
+    anything else, which is every real machine.
+    """
+    from llmjury import memguard
+    busy = HOST_36GB - int(20.8 * GIB)          # 15.2 GB actually free
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED}, available=busy)
+    try:
+        report = memguard.check(["gemma3:12b", "llama3.1:8b", "phi4-mini:3.8b"],
+                                num_ctx=8192, parallel=2)
+        assert not report.ok, (
+            "a council larger than free RAM must be refused even when it fits "
+            f"70% of physical RAM: {report.message()}")
+        assert report.budget <= busy, (
+            "budget must be bounded by memory that actually exists to be taken, "
+            f"got {report.budget / GIB:.1f} GB against {busy / GIB:.1f} GB free")
+    finally:
+        restore()
+
+
+def test_memguard_still_allows_the_shipped_panel_on_an_idle_host():
+    """The free-RAM bound must not turn into a blanket refusal.
+
+    Same panel, same host, nothing else running: this must still pass, or the fix
+    has simply replaced a guard that never fires with one that always does.
+    """
+    from llmjury import memguard, panels
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=2)
+        assert report.ok, f"idle 36 GB host must still run the panel: {report.message()}"
+    finally:
+        restore()
+
+
+def test_memguard_counts_already_resident_models_as_reclaimable():
+    """Models Ollama already holds are not a reason to refuse reloading them.
+
+    Resident models do not show up in free memory, so a naive free-RAM check would
+    refuse a panel that is *already loaded and running fine*. The space they occupy
+    is available to them.
+    """
+    from llmjury import memguard
+    loaded = {"gemma3:12b": int(11.0 * GIB), "llama3.1:8b": int(9.0 * GIB)}
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED},
+                           loaded=loaded, available=int(6.0 * GIB))
+    try:
+        report = memguard.check(["gemma3:12b", "llama3.1:8b"], num_ctx=8192, parallel=2)
+        assert report.ok, (
+            "a panel that is already resident must not be refused: "
+            f"{report.message()}")
+    finally:
+        restore()
+
+
+def test_memguard_skips_when_available_memory_is_unreadable():
+    """Unknown free memory must fall back to the old bound, not fail the run.
+
+    This guard exists to stop a known-bad run, never to become a new way for runs
+    to fail on hosts it cannot measure.
+    """
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED}, available=0)
+    try:
+        report = memguard.check(["gemma3:12b", "llama3.1:8b", "phi4-mini:3.8b"],
+                                num_ctx=8192, parallel=2)
+        assert report.ok, "unreadable free memory must not refuse a panel that fits RAM"
     finally:
         restore()
 

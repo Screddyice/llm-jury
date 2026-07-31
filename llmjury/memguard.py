@@ -34,6 +34,7 @@ one that does not fit takes the machine down.
 import json
 import os
 import platform
+import re
 import subprocess
 import urllib.error
 import urllib.request
@@ -55,6 +56,9 @@ SERVER_DEFAULT_CTX = 32768
 # the editor, the browser, and the agent session that launched this run. At 0.70 a
 # 36 GB host allows ~25 GB of models.
 DEFAULT_MEM_FRACTION = 0.70
+# Of the RAM that is free *right now*. Leaves the OS and the compressor room to
+# breathe rather than planning to occupy every reclaimable page.
+DEFAULT_AVAIL_HEADROOM = 0.85
 
 
 def _env_float(name, default):
@@ -72,6 +76,16 @@ def mem_fraction():
     return _env_float("LLMJURY_MEM_FRACTION", DEFAULT_MEM_FRACTION)
 
 
+def avail_headroom():
+    """Share of currently-free RAM a panel may claim.
+
+    Below 1.0 so a panel never plans to consume every last reclaimable page: the
+    compressor needs room to work, and on this host it was compressor SEGMENT
+    exhaustion -- not raw page exhaustion -- that starved watchdogd into a panic.
+    """
+    return _env_float("LLMJURY_AVAIL_HEADROOM", DEFAULT_AVAIL_HEADROOM)
+
+
 def total_ram_bytes():
     """Physical RAM, or 0 when we cannot tell (which disables the check)."""
     try:
@@ -82,6 +96,41 @@ def total_ram_bytes():
         with open("/proc/meminfo", encoding="utf-8") as fh:
             for line in fh:
                 if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+    return 0
+
+
+def available_ram_bytes():
+    """RAM that could actually be handed to a new model right now, or 0 if unknown.
+
+    ``total_ram_bytes`` describes the machine; this describes the moment. A guard
+    built only on the former cannot see Claude desktop, simulators, browsers, or a
+    hook-driven spawn storm, and will happily approve a council that does not fit.
+
+    Counts free + inactive + purgeable on Darwin: inactive and purgeable pages are
+    reclaimable under pressure, so excluding them would under-report badly on a Mac,
+    where the OS deliberately keeps very little memory outright free.
+    """
+    try:
+        if platform.system() == "Darwin":
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5)
+            if out.returncode != 0:
+                return 0
+            page = 4096
+            head = re.search(r"page size of (\d+) bytes", out.stdout)
+            if head:
+                page = int(head.group(1))
+            pages = 0
+            for field in ("Pages free", "Pages inactive", "Pages purgeable"):
+                m = re.search(rf"^{field}:\s+(\d+)\.", out.stdout, re.M)
+                if m:
+                    pages += int(m.group(1))
+            return pages * page
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
                     return int(line.split()[1]) * 1024
     except (OSError, ValueError, subprocess.SubprocessError):
         return 0
@@ -162,7 +211,7 @@ class Report:
     """Outcome of a preflight check. `ok` False means the panel will not fit."""
 
     def __init__(self, ok, budget=0, projected=0, resident=0, per_model=None,
-                 unknown=None, skipped=None):
+                 unknown=None, skipped=None, available=0, bound=""):
         self.ok = ok
         self.budget = budget
         self.projected = projected
@@ -170,13 +219,21 @@ class Report:
         self.per_model = per_model or []
         self.unknown = unknown or []
         self.skipped = skipped
+        self.available = available
+        # Which limit produced the budget: "free RAM" or "physical RAM". Without
+        # this an operator cannot tell "this panel is too big for any machine"
+        # from "close something and try again".
+        self.bound = bound
 
     def message(self):
         """Operator-facing explanation, with the arithmetic that drove the verdict."""
+        bound = f" ({self.bound})" if self.bound else ""
         lines = [
             f"panel needs ~{self.projected / GB:.1f} GB resident, "
-            f"budget is {self.budget / GB:.1f} GB"
+            f"budget is {self.budget / GB:.1f} GB{bound}"
         ]
+        if self.available:
+            lines.append(f"  {'free RAM right now':<24} ~{self.available / GB:>5.1f} GB")
         for tag, cost in self.per_model:
             lines.append(f"  {tag:<24} ~{cost / GB:>5.1f} GB")
         if self.resident:
@@ -195,6 +252,11 @@ class Report:
         parts.append("set OLLAMA_NUM_PARALLEL=1 (KV is charged num_ctx x slots)")
         if self.resident:
             parts.append("or wait for loaded models to unload (OLLAMA_KEEP_ALIVE)")
+        if self.bound.startswith("limited by free RAM"):
+            # This panel may well fit the machine when it is not busy, so say so
+            # rather than sending the operator off to shrink a fine panel.
+            parts.append("or free memory -- this panel fits the host's RAM but not "
+                         "what is free right now")
         return "; ".join(parts)
 
 
@@ -221,6 +283,21 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
 
     resident_total, resident_by_model = loaded_bytes(host)
 
+    # A fraction of PHYSICAL RAM describes the machine, not the moment. It cannot
+    # see Claude desktop, simulators, browsers, or a hook-driven spawn storm, so on
+    # a busy host it will approve a panel that does not fit -- which is exactly how
+    # this box panicked on 2026-07-31 with 20.8 GB held outside Ollama. Bound the
+    # budget by memory that actually exists to be taken.
+    #
+    # Models Ollama already holds are added back: they do not appear in free memory,
+    # but their space is available to them, so a reload must not be refused.
+    available = available_ram_bytes()
+    bound = "of physical RAM"
+    if available:
+        free_bound = int((available + resident_total) * avail_headroom())
+        if free_bound < budget:
+            budget, bound = free_bound, "limited by free RAM, not total"
+
     # Callers assemble the probe list as [best] + panel, and `best` is normally a
     # member of the panel, so the same tag arrives twice. Ollama loads it once;
     # counting it twice would over-refuse a panel that actually fits.
@@ -244,4 +321,5 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
 
     projected = resident_total + need
     return Report(projected <= budget, budget=budget, projected=projected,
-                  resident=resident_total, per_model=per_model, unknown=unknown)
+                  resident=resident_total, per_model=per_model, unknown=unknown,
+                  available=available, bound=bound)
