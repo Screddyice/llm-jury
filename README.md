@@ -414,6 +414,15 @@ hint: use a smaller panel, e.g. --models llama3.1:8b,gemma3:12b; lower --num-ctx
       set OLLAMA_NUM_PARALLEL=1 (KV is charged num_ctx x slots)
 ```
 
+One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
+into the *server* process, not into the client, so the preflight cannot read it and
+assumes Ollama's default of 4. Export `LLMJURY_OLLAMA_PARALLEL` to match your server and
+the estimate stops being pessimistic:
+
+```bash
+export LLMJURY_OLLAMA_PARALLEL=2      # match OLLAMA_NUM_PARALLEL on the server
+```
+
 The budget defaults to 70% of physical RAM, since the remainder is not slack: it is the
 OS, the editor, the browser, and the agent session that launched the run. Models another
 session already has resident are counted too. Tune with `LLMJURY_MEM_FRACTION`, or relax

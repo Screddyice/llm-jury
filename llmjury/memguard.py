@@ -89,14 +89,22 @@ def total_ram_bytes():
 
 
 def num_parallel():
-    """Slots Ollama decodes per model. KV is charged num_ctx x this."""
-    try:
-        value = int(os.environ.get("OLLAMA_NUM_PARALLEL", "") or 0)
-    except ValueError:
-        value = 0
-    # Ollama's own default when unset. Assume it rather than assuming 1: guessing
-    # low here understates KV by 4x, and understating is the unsafe direction.
-    return value if value > 0 else 4
+    """Slots Ollama decodes per model. KV is charged num_ctx x this.
+
+    The server's setting is usually invisible here: a launchd/systemd unit exports
+    ``OLLAMA_NUM_PARALLEL`` into the *server* process, not into ours. Set
+    ``LLMJURY_OLLAMA_PARALLEL`` to match it and the estimate stops being pessimistic;
+    without it we assume Ollama's own default of 4, since guessing low understates KV
+    fourfold and understating is the direction that panics the host.
+    """
+    for name in ("LLMJURY_OLLAMA_PARALLEL", "OLLAMA_NUM_PARALLEL"):
+        try:
+            value = int(os.environ.get(name, "") or 0)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return 4
 
 
 def _get_json(url, timeout=5):
