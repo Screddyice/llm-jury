@@ -996,6 +996,32 @@ def test_memguard_allows_the_shipped_panel_at_its_documented_parallelism():
         restore()
 
 
+def test_local_panel_mirrors_cloud_panel_lineages():
+    """The local council is meant to be the benchmarked council, run locally.
+
+    CLOUD_PANEL is what the published numbers were measured with. LOCAL_PANEL mirrors
+    its *lineages* so those numbers describe something reproducible off-cloud. Exact
+    tags cannot match (phi-4 is 12.7 GiB locally and no 3-model panel holding it fits a
+    36 GiB host), so a panelist may be swapped for a smaller model from the SAME lab —
+    never for a different lab, which would silently drop a lineage from the council and
+    make the benchmark a weaker description of local behaviour.
+    """
+    from llmjury import panels
+    lineage = {
+        "microsoft/phi-4": "microsoft", "phi4": "microsoft", "phi4-mini:3.8b": "microsoft",
+        "google/gemma-3-12b-it": "google", "gemma3:12b": "google",
+        "meta-llama/llama-3.1-8b-instruct": "meta", "llama3.1:8b": "meta",
+        "granite4.1:3b": "ibm", "qwen3:8b": "alibaba", "qwen3.5:4b": "alibaba",
+    }
+    missing = [m for m in panels.CLOUD_PANEL + panels.LOCAL_PANEL if m not in lineage]
+    assert not missing, f"unmapped model, extend the lineage table: {missing}"
+    cloud = sorted(lineage[m] for m in panels.CLOUD_PANEL)
+    local = sorted(lineage[m] for m in panels.LOCAL_PANEL)
+    assert local == cloud, (
+        f"local council must mirror the benchmarked lineages {cloud}, got {local}. "
+        "Substitute within a lab (phi-4 -> phi4-mini), do not swap labs.")
+
+
 def test_memguard_refuses_the_shipped_panel_at_stock_parallelism():
     """The other half of the contract: an untuned host is REFUSED, never panicked.
 

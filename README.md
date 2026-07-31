@@ -340,16 +340,25 @@ read as a separately measured benchmark result until that exact policy is reprod
 
 - **Ollama (local, free, private)** — `--backend ollama`. Pull the council first:
   ```bash
-  ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull granite4.1:3b
+  ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b
   ```
-  The default panel is cross-lineage (Google / Meta / IBM) and **requires
-  `OLLAMA_NUM_PARALLEL=2`**. KV cache is charged `num_ctx x slots`, so parallelism
-  multiplies memory for every model on the server and is part of a panel's spec:
+  The local council mirrors the lineages of the benchmarked cloud panel — Google /
+  Meta / Microsoft — so the measured numbers describe something reproducible
+  off-cloud. The mirror is not exact and cannot be: `phi-4` is 12.7 GiB locally, and
+  the benchmarked trio `phi4 + gemma3:12b + llama3.1:8b` projects 31.7 GiB against a
+  25.2 GiB budget on a 36 GiB host. No `num_ctx` or slot count fits it, since the
+  weights alone are ~28 GiB. `phi-4` is therefore substituted by `phi4-mini:3.8b`
+  from the same family, keeping all three labs on the council. **For exact benchmark
+  fidelity use `--backend openrouter`, which runs `CLOUD_PANEL` unchanged.**
+
+  The default **requires `OLLAMA_NUM_PARALLEL=2`**. KV cache is charged
+  `num_ctx x slots`, so parallelism multiplies memory for every model on the server
+  and is part of a panel's spec:
 
   | slots | projected | 36 GiB host, budget 25.2 GiB |
   |-------|-----------|------------------------------|
-  | 2     | 23.0 GiB  | fits                         |
-  | 4 (Ollama default) | 26.8 GiB | refused, with a hint |
+  | 2     | 23.4 GiB  | fits                         |
+  | 4 (Ollama default) | 27.3 GiB | refused, with a hint |
 
   Set it on the server and tell the client, then restart Ollama:
   ```bash
@@ -360,7 +369,7 @@ read as a separately measured benchmark result until that exact policy is reprod
   ```
   Leaving Ollama at 4 slots is safe, just smaller: the preflight runs before any
   model loads, so you get an actionable refusal naming a smaller panel rather than a
-  host that swaps itself to death. Drop `granite4.1:3b`, or use
+  host that swaps itself to death. Use
   `--models llama3.1:8b,phi4-mini:3.8b,granite4.1:3b` (19.7 GiB at 4 slots) if you
   would rather not tune the server. `--models` is gated by the same preflight.
 
