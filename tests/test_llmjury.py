@@ -943,17 +943,25 @@ MEASURED = [
 HOST_36GB = 38654705664          # hw.memsize on the machine that panicked
 
 
-def _fake_ollama(monkeypatched, sizes_gb, loaded=None):
-    """Point memguard at a synthetic host. Returns a restore callable."""
+def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0)):
+    """Point memguard at a synthetic host. Returns a restore callable.
+
+    Also stubs the simulator probe: without that, every test here would inherit
+    the REAL machine's simulator state, and a booted iPhone on the developer's
+    desk would fail the whole suite.
+    """
     from llmjury import memguard
-    saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes)
+    saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
+             memguard.simulator_stack)
     loaded = loaded or {}
     memguard.disk_sizes = lambda host: {t: int(g * 1e9) for t, g in sizes_gb.items()}
     memguard.loaded_bytes = lambda host: (sum(loaded.values()), dict(loaded))
     memguard.total_ram_bytes = lambda: monkeypatched
+    memguard.simulator_stack = lambda: simulator
 
     def restore():
-        memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes = saved
+        (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
+         memguard.simulator_stack) = saved
     return restore
 
 
@@ -1098,8 +1106,9 @@ def test_memguard_counts_a_repeated_tag_once():
 def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
     """The guard exists to stop a known-bad run, not to invent new failures."""
     from llmjury import memguard
-    saved = (memguard.disk_sizes, memguard.total_ram_bytes)
+    saved = (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack)
     try:
+        memguard.simulator_stack = lambda: (False, 0)
         memguard.total_ram_bytes = lambda: 0
         assert memguard.check(["phi4"]).ok
         memguard.total_ram_bytes = lambda: HOST_36GB
@@ -1107,7 +1116,65 @@ def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
         report = memguard.check(["phi4"])
         assert report.ok and report.skipped
     finally:
-        memguard.disk_sizes, memguard.total_ram_bytes = saved
+        memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack = saved
+
+
+def test_memguard_refuses_a_local_panel_while_a_simulator_is_booted():
+    """Regression for 2026-08-01: council + CoreSimulator stack is the co-residency
+    that takes a 36 GB host down. The stack measured 17.6 GB across 282 processes,
+    none of which appear in Ollama's numbers, so the refusal must come before any
+    RAM arithmetic -- even a panel that would otherwise fit is refused."""
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
+                           simulator=(True, int(17.6 * memguard.GB)))
+    try:
+        report = memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2)
+        assert not report.ok
+        assert report.simulator
+        assert "Simulator" in report.message()
+        assert "17.6 GB" in report.message()
+        assert "simctl shutdown" in report.hint()
+        assert memguard.SIMULATOR_OVERRIDE_ENV in report.hint()
+    finally:
+        restore()
+
+
+def test_memguard_simulator_override_env_allows_coresidency():
+    """The escape hatch is explicit: with the env var set, the check falls through
+    to the normal RAM arithmetic instead of the simulator refusal. (Plain
+    os.environ handling, not pytest's monkeypatch -- CI runs these functions
+    through the zero-dependency runner, where fixtures do not exist.)"""
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
+                           simulator=(True, int(17.6 * 1e9)))
+    env = memguard.SIMULATOR_OVERRIDE_ENV
+    saved = os.environ.get(env)
+    try:
+        os.environ[env] = "1"
+        report = memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2)
+        assert report.ok and not report.simulator
+        os.environ[env] = "0"
+        assert not memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).ok
+    finally:
+        if saved is None:
+            os.environ.pop(env, None)
+        else:
+            os.environ[env] = saved
+        restore()
+
+
+def test_memguard_simulator_probe_fails_open():
+    """A host where pgrep is missing or errors must not start refusing panels."""
+    import subprocess as sp
+    from llmjury import memguard
+    saved = sp.run
+    try:
+        def boom(*a, **k):
+            raise OSError("no pgrep on this host")
+        sp.run = boom
+        assert memguard.simulator_stack() == (False, 0)
+    finally:
+        sp.run = saved
 
 
 if __name__ == "__main__":

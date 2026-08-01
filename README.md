@@ -445,6 +445,16 @@ hint: use a smaller panel, e.g. --models llama3.1:8b,gemma3:12b; lower --num-ctx
       set OLLAMA_NUM_PARALLEL=1 (KV is charged num_ctx x slots)
 ```
 
+The same preflight also refuses a local panel while an **iOS Simulator is booted**.
+The CoreSimulator stack is hundreds of XPC services whose resident cost (17.6 GB
+measured across 282 processes on the 36 GB reference host) appears in none of the
+numbers this module can model, and a council loaded on top of it is precisely the
+co-residency that panics a machine. The refusal names the stack's measured size and
+the ways out: `xcrun simctl shutdown all` (a simulator reboots in seconds), a cloud
+backend, or the explicit `LLMJURY_ALLOW_SIMULATOR=1` escape hatch for hosts with the
+RAM to hold both. Detection fails open — a host without `pgrep` never starts
+refusing panels — and non-macOS hosts skip the probe entirely.
+
 One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
 into the *server* process, not into the client, so the preflight cannot read it and
 assumes Ollama's default of 4. Export `LLMJURY_OLLAMA_PARALLEL` to match your server and
