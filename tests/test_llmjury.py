@@ -1139,19 +1139,27 @@ def test_memguard_refuses_a_local_panel_while_a_simulator_is_booted():
         restore()
 
 
-def test_memguard_simulator_override_env_allows_coresidency(monkeypatch):
+def test_memguard_simulator_override_env_allows_coresidency():
     """The escape hatch is explicit: with the env var set, the check falls through
-    to the normal RAM arithmetic instead of the simulator refusal."""
+    to the normal RAM arithmetic instead of the simulator refusal. (Plain
+    os.environ handling, not pytest's monkeypatch -- CI runs these functions
+    through the zero-dependency runner, where fixtures do not exist.)"""
     from llmjury import memguard
     restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
                            simulator=(True, int(17.6 * 1e9)))
+    env = memguard.SIMULATOR_OVERRIDE_ENV
+    saved = os.environ.get(env)
     try:
-        monkeypatch.setenv(memguard.SIMULATOR_OVERRIDE_ENV, "1")
+        os.environ[env] = "1"
         report = memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2)
         assert report.ok and not report.simulator
-        monkeypatch.setenv(memguard.SIMULATOR_OVERRIDE_ENV, "0")
+        os.environ[env] = "0"
         assert not memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).ok
     finally:
+        if saved is None:
+            os.environ.pop(env, None)
+        else:
+            os.environ[env] = saved
         restore()
 
 
