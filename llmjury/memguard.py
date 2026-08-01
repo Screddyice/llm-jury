@@ -56,6 +56,12 @@ SERVER_DEFAULT_CTX = 32768
 # 36 GB host allows ~25 GB of models.
 DEFAULT_MEM_FRACTION = 0.70
 
+# Set to any non-empty value except "0" to permit a local panel while an iOS
+# Simulator is booted. The default is refusal: a booted simulator was measured at
+# 17.6 GB resident (282 CoreSimulator processes) on the 36 GB reference host, and a
+# council on top of that is exactly the co-residency that panics a machine.
+SIMULATOR_OVERRIDE_ENV = "LLMJURY_ALLOW_SIMULATOR"
+
 
 def _env_float(name, default):
     raw = os.environ.get(name)
@@ -105,6 +111,44 @@ def num_parallel():
         if value > 0:
             return value
     return 4
+
+
+def simulator_stack():
+    """Is an iOS Simulator booted on this host, and what does its stack hold?
+
+    Returns ``(running, rss_bytes)``. A booted simulator device always runs
+    ``launchd_sim``; the resident cost is summed over every CoreSimulator-path
+    process because the stack is hundreds of small XPC services, not one big one
+    (282 processes / 17.6 GB measured on the host this gate was written for).
+
+    Any probe failure returns ``(False, 0)`` -- fail open, same policy as the rest
+    of this module: the guard stops a known-bad run, it must not invent failures.
+    Simulators are a macOS concern, so every other platform short-circuits.
+    """
+    if platform.system() != "Darwin":
+        return False, 0
+    try:
+        probe = subprocess.run(["pgrep", "-x", "launchd_sim"],
+                               capture_output=True, timeout=5)
+    except Exception:
+        return False, 0
+    if probe.returncode != 0:
+        return False, 0
+    rss = 0
+    try:
+        ps = subprocess.run(["ps", "-Axo", "rss=,comm="],
+                            capture_output=True, text=True, timeout=5)
+        for line in ps.stdout.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and "CoreSimulator" in parts[1]:
+                rss += int(parts[0]) * 1024
+    except Exception:
+        rss = 0
+    return True, rss
+
+
+def _simulator_allowed():
+    return os.environ.get(SIMULATOR_OVERRIDE_ENV, "").strip() not in ("", "0")
 
 
 def _get_json(url, timeout=5):
@@ -162,7 +206,7 @@ class Report:
     """Outcome of a preflight check. `ok` False means the panel will not fit."""
 
     def __init__(self, ok, budget=0, projected=0, resident=0, per_model=None,
-                 unknown=None, skipped=None):
+                 unknown=None, skipped=None, simulator=False, simulator_rss=0):
         self.ok = ok
         self.budget = budget
         self.projected = projected
@@ -170,9 +214,16 @@ class Report:
         self.per_model = per_model or []
         self.unknown = unknown or []
         self.skipped = skipped
+        self.simulator = simulator
+        self.simulator_rss = simulator_rss
 
     def message(self):
         """Operator-facing explanation, with the arithmetic that drove the verdict."""
+        if self.simulator:
+            held = (f" (holding ~{self.simulator_rss / GB:.1f} GB)"
+                    if self.simulator_rss else "")
+            return (f"an iOS Simulator is booted{held}; a local panel cannot "
+                    "co-reside with the CoreSimulator stack on this host")
         lines = [
             f"panel needs ~{self.projected / GB:.1f} GB resident, "
             f"budget is {self.budget / GB:.1f} GB"
@@ -186,6 +237,11 @@ class Report:
         return "\n".join(lines)
 
     def hint(self):
+        if self.simulator:
+            return ("shut the simulator down first: `xcrun simctl shutdown all` "
+                    "(it reboots in seconds when next needed); or use a cloud "
+                    "backend (--backend openrouter / --frontier-backend codex); "
+                    f"or set {SIMULATOR_OVERRIDE_ENV}=1 to allow co-residency")
         cheapest = sorted(self.per_model, key=lambda kv: kv[1])[:2]
         parts = []
         if cheapest:
@@ -206,6 +262,16 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
     RAM unreadable -- yields ``ok=True`` with ``skipped`` set: this guard exists to
     stop a known-bad run, not to become a new way for runs to fail.
     """
+    # A booted iOS Simulator excludes a local panel outright, before any RAM
+    # arithmetic: the CoreSimulator stack is hundreds of processes whose resident
+    # cost (17.6 GB measured) does not show up in any number this module models,
+    # and council-plus-simulator is the co-residency that takes the host down.
+    # The operator escape hatch is deliberate and explicit, never inferred.
+    if not _simulator_allowed():
+        sim_running, sim_rss = simulator_stack()
+        if sim_running:
+            return Report(False, simulator=True, simulator_rss=sim_rss)
+
     total = total_ram_bytes()
     if not total:
         return Report(True, skipped="cannot read physical RAM")

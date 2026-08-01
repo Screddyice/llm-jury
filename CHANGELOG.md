@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Refuse local panels while an iOS Simulator is booted.** The CoreSimulator stack
+  measured 17.6 GB resident across 282 processes on the 36 GB reference host — cost
+  the RAM preflight cannot see, because none of it belongs to Ollama. A council on
+  top of a booted simulator is the co-residency that repeatedly took that host down,
+  so `memguard.check` now refuses before any RAM arithmetic when `launchd_sim` is
+  running. The refusal reports the stack's measured size and hints the exits:
+  `xcrun simctl shutdown all`, a cloud backend, or `LLMJURY_ALLOW_SIMULATOR=1` to
+  permit co-residency deliberately. Detection fails open and only runs on macOS.
+
 - **Refuse local panels that do not fit in RAM.** A council loads every panelist at
   once, but Ollama caps residency by model count (default 3, exactly a panel), never by
   bytes, so nothing knew the aggregate. The previous default panel measured 34 GB
