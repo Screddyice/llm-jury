@@ -62,6 +62,21 @@ DEFAULT_MEM_FRACTION = 0.70
 # council on top of that is exactly the co-residency that panics a machine.
 SIMULATOR_OVERRIDE_ENV = "LLMJURY_ALLOW_SIMULATOR"
 
+# Backdoor's hybrid router (the :8083 proxy that fronts Claude Code) publishes its
+# circuit-breaker state here. An OPEN breaker means the router has committed the
+# local Ollama server to keeping in-flight sessions alive -- the same server and
+# the same VRAM a council needs, so running one anyway is a fight over ~13 GB of
+# qwen tier plus ~23 GB of panel on a 36 GB host.
+#
+# It also means something stronger. The router opens that breaker on exactly one
+# condition: this host is offline. So when it is set, the frontier ladder is
+# unreachable too, and there is no tier left to escalate to -- which is why this
+# refusal is marked `offline` and the CLI exits instead of falling through to the
+# cloud the way a RAM or simulator refusal does.
+ROUTER_STATE_PATH = os.environ.get(
+    "LLMJURY_ROUTER_STATE") or os.path.expanduser("~/.backdoor/failover-state.json")
+ROUTER_OVERRIDE_ENV = "LLMJURY_ALLOW_ROUTER_FAILOVER"
+
 
 def _env_float(name, default):
     raw = os.environ.get(name)
@@ -151,6 +166,46 @@ def _simulator_allowed():
     return os.environ.get(SIMULATOR_OVERRIDE_ENV, "").strip() not in ("", "0")
 
 
+def _router_allowed():
+    return os.environ.get(ROUTER_OVERRIDE_ENV, "").strip() not in ("", "0")
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True          # exists but not ours to signal
+    return True
+
+
+def router_failover(path=None):
+    """Is backdoor's router currently serving traffic from the local GPU?
+
+    Returns ``(active, reason)``. A missing, unreadable, or unparseable file
+    means "not failing over" -- which is also the state of a host with no router
+    installed at all. Fail open, same policy as the rest of this module.
+
+    A flag whose writer is gone is treated as inactive. The router clears the
+    flag on recovery, but a router *killed* while OPEN would leave it set
+    forever, and permanently disabling the council is a worse failure than the
+    brief race this avoids.
+    """
+    try:
+        with open(path or ROUTER_STATE_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False, ""
+    if not isinstance(data, dict) or not data.get("failover_active"):
+        return False, ""
+    pid = data.get("pid")
+    if isinstance(pid, int) and not _pid_alive(pid):
+        return False, ""
+    reason = data.get("reason")
+    return True, reason if isinstance(reason, str) else ""
+
+
 def _get_json(url, timeout=5):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
@@ -206,7 +261,8 @@ class Report:
     """Outcome of a preflight check. `ok` False means the panel will not fit."""
 
     def __init__(self, ok, budget=0, projected=0, resident=0, per_model=None,
-                 unknown=None, skipped=None, simulator=False, simulator_rss=0):
+                 unknown=None, skipped=None, simulator=False, simulator_rss=0,
+                 router=False, router_reason=""):
         self.ok = ok
         self.budget = budget
         self.projected = projected
@@ -216,9 +272,28 @@ class Report:
         self.skipped = skipped
         self.simulator = simulator
         self.simulator_rss = simulator_rss
+        self.router = router
+        self.router_reason = router_reason
+
+    @property
+    def offline(self):
+        """Is the cloud unreachable too, so escalating cannot help?
+
+        A RAM or simulator refusal is about THIS host's memory and leaves the
+        frontier ladder perfectly usable. A router-failover refusal does not:
+        the router only fails over when the host is offline, so there is no tier
+        left to escalate to. Callers use this to decide between falling through
+        to the frontier and stopping outright.
+        """
+        return self.router
 
     def message(self):
         """Operator-facing explanation, with the arithmetic that drove the verdict."""
+        if self.router:
+            because = f" ({self.router_reason})" if self.router_reason else ""
+            return (f"backdoor's router has failed over to the local GPU{because}; "
+                    "it opens that breaker only when this host is offline, so "
+                    "neither the local council nor the cloud ladder is available")
         if self.simulator:
             held = (f" (holding ~{self.simulator_rss / GB:.1f} GB)"
                     if self.simulator_rss else "")
@@ -237,6 +312,11 @@ class Report:
         return "\n".join(lines)
 
     def hint(self):
+        if self.router:
+            return ("wait for the network — the router closes its breaker on its own "
+                    f"and republishes the change; inspect {ROUTER_STATE_PATH}; or set "
+                    f"{ROUTER_OVERRIDE_ENV}=1 to run anyway (the council will then "
+                    "contend with the router for the same VRAM)")
         if self.simulator:
             return ("shut the simulator down first: `xcrun simctl shutdown all` "
                     "(it reboots in seconds when next needed); or use a cloud "
@@ -262,6 +342,14 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
     RAM unreadable -- yields ``ok=True`` with ``skipped`` set: this guard exists to
     stop a known-bad run, not to become a new way for runs to fail.
     """
+    # The router owns the GPU when it has failed over, and its failover means the
+    # host is offline. Checked first because it is the only refusal that also
+    # rules out escalating to the cloud -- there is nothing else to try.
+    if not _router_allowed():
+        failing_over, reason = router_failover()
+        if failing_over:
+            return Report(False, router=True, router_reason=reason)
+
     # A booted iOS Simulator excludes a local panel outright, before any RAM
     # arithmetic: the CoreSimulator stack is hundreds of processes whose resident
     # cost (17.6 GB measured) does not show up in any number this module models,

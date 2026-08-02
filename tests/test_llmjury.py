@@ -943,25 +943,28 @@ MEASURED = [
 HOST_36GB = 38654705664          # hw.memsize on the machine that panicked
 
 
-def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0)):
+def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0),
+                 router=(False, "")):
     """Point memguard at a synthetic host. Returns a restore callable.
 
-    Also stubs the simulator probe: without that, every test here would inherit
-    the REAL machine's simulator state, and a booted iPhone on the developer's
-    desk would fail the whole suite.
+    Also stubs the simulator and router probes: without that, every test here
+    would inherit the REAL machine's state, and a booted iPhone on the
+    developer's desk — or a backdoor router mid-failover — would fail the whole
+    suite.
     """
     from llmjury import memguard
     saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
-             memguard.simulator_stack)
+             memguard.simulator_stack, memguard.router_failover)
     loaded = loaded or {}
     memguard.disk_sizes = lambda host: {t: int(g * 1e9) for t, g in sizes_gb.items()}
     memguard.loaded_bytes = lambda host: (sum(loaded.values()), dict(loaded))
     memguard.total_ram_bytes = lambda: monkeypatched
     memguard.simulator_stack = lambda: simulator
+    memguard.router_failover = lambda path=None: router
 
     def restore():
         (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
-         memguard.simulator_stack) = saved
+         memguard.simulator_stack, memguard.router_failover) = saved
     return restore
 
 
@@ -1175,6 +1178,152 @@ def test_memguard_simulator_probe_fails_open():
         assert memguard.simulator_stack() == (False, 0)
     finally:
         sp.run = saved
+
+
+# ── GPU contention with backdoor's router ────────────────────────────────────
+# The router fails over to local Ollama only when the host is OFFLINE. That makes
+# it the one refusal where escalating to the cloud cannot help either, so it is
+# the one refusal that stops the run outright.
+
+
+def _router_state(tmpdir, **payload):
+    path = Path(tmpdir) / "failover-state.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return str(path)
+
+
+def test_router_failover_refuses_and_marks_the_run_offline():
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
+                           router=(True, "ConnectError"))
+    try:
+        report = memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2)
+        assert not report.ok
+        assert report.router and report.offline, (
+            "a router refusal must be flagged offline so the CLI does not "
+            "escalate to a cloud ladder that is equally unreachable")
+        assert "offline" in report.message()
+    finally:
+        restore()
+
+
+def test_ram_and_simulator_refusals_are_not_offline():
+    """Only the router refusal blocks escalation; the others leave cloud usable."""
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED},
+                           simulator=(True, int(17.6 * 1e9)))
+    try:
+        assert memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).offline is False
+    finally:
+        restore()
+    restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
+    try:
+        over = memguard.check(["phi4", "gemma3:12b", "llama3.1:8b"],
+                              num_ctx=8192, parallel=4)
+        assert not over.ok and over.offline is False
+    finally:
+        restore()
+
+
+def test_router_state_missing_or_junk_reads_as_inactive():
+    """No router installed, or a half-written file, must not disable the council."""
+    from llmjury import memguard
+    with tempfile.TemporaryDirectory() as td:
+        assert memguard.router_failover(str(Path(td) / "nope.json")) == (False, "")
+        junk = Path(td) / "junk.json"
+        junk.write_text("{not json", encoding="utf-8")
+        assert memguard.router_failover(str(junk)) == (False, "")
+        inactive = _router_state(td, failover_active=False, pid=os.getpid())
+        assert memguard.router_failover(inactive) == (False, "")
+
+
+def test_router_state_is_read_when_active():
+    from llmjury import memguard
+    with tempfile.TemporaryDirectory() as td:
+        path = _router_state(td, failover_active=True, reason="ConnectError",
+                             pid=os.getpid())
+        assert memguard.router_failover(path) == (True, "ConnectError")
+
+
+def test_router_state_from_a_dead_writer_is_ignored():
+    """A router killed while OPEN would otherwise disable the council forever."""
+    from llmjury import memguard
+    with tempfile.TemporaryDirectory() as td:
+        # PID 2^22 is above the kernel maximum, so it cannot be a live process.
+        path = _router_state(td, failover_active=True, reason="ConnectError",
+                             pid=4194304)
+        assert memguard.router_failover(path) == (False, "")
+
+
+def test_router_override_lets_the_council_run_anyway():
+    from llmjury import memguard
+    restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
+                           router=(True, "ConnectError"))
+    env = memguard.ROUTER_OVERRIDE_ENV
+    saved = os.environ.get(env)
+    try:
+        os.environ[env] = "1"
+        assert memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).ok
+        os.environ[env] = "0"
+        assert not memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).ok
+    finally:
+        if saved is None:
+            os.environ.pop(env, None)
+        else:
+            os.environ[env] = saved
+        restore()
+
+
+# ── Frontier fallback when the panel cannot load ─────────────────────────────
+
+
+def test_engine_skips_the_panel_but_still_runs_the_frontier():
+    """use_panel=False must reach the ladder without touching a local model."""
+    from llmjury.engine import Engine
+
+    calls = []
+
+    class Backend:
+        name = "ollama"
+
+        def complete(self, model, prompt, n, temperature, max_tokens):
+            calls.append(model)
+            return ["def solve():\n    return 1"] * n
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    r = Engine(Backend(), panel=["gemma3:12b"], best="gemma3:12b", k=1,
+               frontier=["deepseek/deepseek-v4-flash"], frontier_backend=Backend(),
+               use_panel=False).solve("t", Verifier())
+    assert r.verified and r.stage == "frontier"
+    assert calls == ["deepseek/deepseek-v4-flash"], (
+        f"no local panelist may be called when use_panel=False, got {calls}")
+
+
+def test_engine_runs_the_panel_by_default():
+    """The fallback must not change the normal path: panel first, frontier last."""
+    from llmjury.engine import Engine
+
+    calls = []
+
+    class Backend:
+        name = "ollama"
+
+        def complete(self, model, prompt, n, temperature, max_tokens):
+            calls.append(model)
+            return ["def solve():\n    return 1"] * n
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    r = Engine(Backend(), panel=["gemma3:12b"], best="gemma3:12b", k=1,
+               frontier=["deepseek/deepseek-v4-flash"], frontier_backend=Backend()
+               ).solve("t", Verifier())
+    assert r.verified and r.stage == "single"
+    assert calls == ["gemma3:12b"]
 
 
 if __name__ == "__main__":
