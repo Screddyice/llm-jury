@@ -1109,9 +1109,11 @@ def test_memguard_counts_a_repeated_tag_once():
 def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
     """The guard exists to stop a known-bad run, not to invent new failures."""
     from llmjury import memguard
-    saved = (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack)
+    saved = (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack,
+             memguard.router_failover)
     try:
         memguard.simulator_stack = lambda: (False, 0)
+        memguard.router_failover = lambda path=None: (False, "")
         memguard.total_ram_bytes = lambda: 0
         assert memguard.check(["phi4"]).ok
         memguard.total_ram_bytes = lambda: HOST_36GB
@@ -1119,7 +1121,8 @@ def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
         report = memguard.check(["phi4"])
         assert report.ok and report.skipped
     finally:
-        memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack = saved
+        (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack,
+         memguard.router_failover) = saved
 
 
 def test_memguard_refuses_a_local_panel_while_a_simulator_is_booted():
