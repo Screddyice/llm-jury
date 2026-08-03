@@ -167,6 +167,7 @@ def cmd_solve(a):
     fb = None
     if frontier:
         fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
+    use_panel = True
     if backend.name == "ollama":
         # Preflight: flag panel tags with a baked SYSTEM prompt before spending
         # minutes prefilling one (see baked_system_warnings for the field data).
@@ -187,18 +188,42 @@ def cmd_solve(a):
             if not report.ok:
                 sys.stderr.write("[llmjury] " + report.message() + "\n")
                 if a.mem_check == "refuse":
-                    sys.exit(
-                        "error: this panel would over-commit the host, which can hang or "
-                        f"panic it.\nhint: {report.hint()}\n"
-                        "override: --mem-check warn (proceed anyway) or off (skip the check)")
-                sys.stderr.write(f"[llmjury] proceeding anyway: {report.hint()}\n")
+                    # A refusal usually says the PANEL cannot load here and nothing
+                    # more, leaving the frontier ladder — remote, costing this host
+                    # no memory — perfectly usable. Drop the panel and escalate
+                    # rather than killing a run that still has a safe path to a
+                    # verified answer. Two refusals are not like that:
+                    #   report.offline   the router failed over, so there is no
+                    #                    internet and the ladder is unreachable too
+                    #   ollama frontier  would load the very models just refused.
+                    #                    Not selectable today (--frontier-backend is
+                    #                    openrouter/codex/grok); kept so that adding
+                    #                    it cannot silently re-open the hole.
+                    if frontier and not report.offline and a.frontier_backend != "ollama":
+                        use_panel = False
+                        sys.stderr.write(
+                            "[llmjury] skipping the local council; escalating straight to "
+                            + " -> ".join(frontier) + f" on {a.frontier_backend} "
+                            "(remote, needs no memory on this host)\n")
+                    elif report.offline:
+                        sys.exit(f"error: llm-jury is standing down.\nhint: {report.hint()}")
+                    else:
+                        sys.exit(
+                            "error: this panel would over-commit the host, which can hang or "
+                            f"panic it.\nhint: {report.hint()}\n"
+                            "or: add --frontier auto to escalate to the cloud ladder, which "
+                            "needs no local memory\n"
+                            "override: --mem-check warn (proceed anyway) or off (skip the check)")
+                else:
+                    sys.stderr.write(f"[llmjury] proceeding anyway: {report.hint()}\n")
         for warning in baked_system_warnings(
                 probe, lambda m: show_system_chars(backend.host, m)):
             sys.stderr.write(warning + "\n")
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
-               frontier=frontier, frontier_backend=fb, route=route).solve(task, verifier)
+               frontier=frontier, frontier_backend=fb, route=route,
+               use_panel=use_panel).solve(task, verifier)
 
     if a.json:
         import dataclasses

@@ -39,7 +39,7 @@ class Result:
 class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
                  k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
-                 route=None, workers=None, frontier_max_tokens=None):
+                 route=None, workers=None, frontier_max_tokens=None, use_panel=True):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -63,6 +63,13 @@ class Engine:
         # fine-tuned MLX brain on an OpenAI-compatible endpoint — sit in the council
         # alongside the default panel. Empty by default, so the common path is unchanged.
         self.route = route or {}
+        # Stages 1-2 (best-of-k, then the council) run the panel on `backend`.
+        # `use_panel=False` skips both and starts at the frontier ladder. That is for
+        # a caller which has determined the panel cannot be loaded SAFELY — see the
+        # memguard preflight, where a panel that would over-commit the host is refused
+        # before any model loads. The frontier tier runs on a remote provider and
+        # costs this host no memory, so it stays a valid path when the panel is not.
+        self.use_panel = use_panel
         # Generation threads shared by all of a solve()'s stages. The default is
         # sized so an entire council stage (every panelist x k samples) can be
         # in flight at once.
@@ -115,19 +122,20 @@ class Engine:
 
         ex = ThreadPoolExecutor(max_workers=self.workers)
         try:
-            # Stage 1: single best model, best-of-k.
-            r = run_stage(ex, [(self.best, backend_for(self.best))], "single")
-            if r:
-                return r
+            if self.use_panel:
+                # Stage 1: single best model, best-of-k.
+                r = run_stage(ex, [(self.best, backend_for(self.best))], "single")
+                if r:
+                    return r
 
-            # Stage 2: the rest of the diverse council, all panelists at once
-            # (skip best, already tried).
-            if escalate:
-                rest = [(m, backend_for(m)) for m in self.panel if m != self.best]
-                if rest:
-                    r = run_stage(ex, rest, "council")
-                    if r:
-                        return r
+                # Stage 2: the rest of the diverse council, all panelists at once
+                # (skip best, already tried).
+                if escalate:
+                    rest = [(m, backend_for(m)) for m in self.panel if m != self.best]
+                    if rest:
+                        r = run_stage(ex, rest, "council")
+                        if r:
+                            return r
 
             # Stage 3: opt-in frontier escalation — one strong (cloud) model, only when
             # the local council couldn't verify. This is what lets a local-first setup

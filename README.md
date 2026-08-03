@@ -455,6 +455,45 @@ backend, or the explicit `LLMJURY_ALLOW_SIMULATOR=1` escape hatch for hosts with
 RAM to hold both. Detection fails open — a host without `pgrep` never starts
 refusing panels — and non-macOS hosts skip the probe entirely.
 
+A refusal is not the end of the run. It says the *panel* cannot load here, which says
+nothing about the frontier ladder — that runs on a remote provider and costs this host
+no memory. So when `--frontier` is set, a refusal **skips the local council and
+escalates straight to the ladder** instead of killing a run that still has a safe path
+to a verified answer:
+
+```
+[llmjury] an iOS Simulator is booted (holding ~18.7 GB); a local panel cannot co-reside …
+[llmjury] skipping the local council; escalating straight to deepseek/deepseek-v4-flash
+          -> deepseek/deepseek-v4-pro -> anthropic/claude-opus-5 on openrouter
+          (remote, needs no memory on this host)
+# llmjury: VERIFIED  [stage=frontier, model=deepseek/deepseek-v4-flash, attempts=1]
+```
+
+Without a `--frontier` ladder there is nothing to escalate to, so the run still stops —
+and the error now points at `--frontier auto` as the way through.
+
+#### Standing down for a local router
+
+There is one refusal that does *not* escalate. [Backdoor](https://github.com/Screddyice/backdoor)'s
+hybrid router fronts Claude Code and, when its circuit breaker opens, serves sessions
+from a local Ollama profile — the same server and the same VRAM a council needs. It
+publishes that state to `~/.backdoor/failover-state.json`, and LLM-Jury reads it:
+
+```
+[llmjury] backdoor's router has failed over to the local GPU (ConnectError); it opens
+          that breaker only when this host is offline, so neither the local council nor
+          the cloud ladder is available
+error: llm-jury is standing down.
+```
+
+The breaker opens on exactly one condition — the host is offline — which is why this
+refusal is terminal rather than an escalation: there is no reachable tier left. The two
+tools therefore never contend for the same GPU. Reading is defensive: a missing,
+unparseable, or inactive file means "not failing over" (the state of any host with no
+router at all), and a flag whose writing process is gone is ignored, so a router killed
+mid-failover cannot disable the council forever. Point elsewhere with
+`LLMJURY_ROUTER_STATE`, or override with `LLMJURY_ALLOW_ROUTER_FAILOVER=1`.
+
 One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
 into the *server* process, not into the client, so the preflight cannot read it and
 assumes Ollama's default of 4. Export `LLMJURY_OLLAMA_PARALLEL` to match your server and
