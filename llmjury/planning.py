@@ -7,6 +7,8 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .cliproc import run_cli
+
 
 PLAN_SCHEMA = {
     "type": "object",
@@ -119,16 +121,14 @@ class ClaudePlanner:
         if model:
             cmd.extend(["--model", model])
         cmd.append(PLAN_PROMPT.format(task=task.strip()))
-        try:
-            completed = self.runner(
-                cmd, cwd=str(workspace), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, timeout=self.timeout, check=False,
-            )
-        except subprocess.TimeoutExpired:
+        outcome = run_cli(self.runner, cmd, self.timeout, cwd=str(workspace))
+        if outcome.timed_out:
             return PlanResult("blocked", f"Claude timed out after {self.timeout}s", [], [],
                               ["The planning call exceeded its timeout."], 124)
-        except OSError as exc:
-            return PlanResult("blocked", "Claude could not be started", [], [], [str(exc)], 127)
+        if outcome.os_error is not None:
+            return PlanResult("blocked", "Claude could not be started", [], [],
+                              [str(outcome.os_error)], 127)
+        completed = outcome.completed
 
         payload = self._payload(completed.stdout)
         if not validate_plan(payload):

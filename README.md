@@ -619,6 +619,14 @@ configuration — both are gitignored. `AGENTS.md` is the tracked, shared agent 
 put anything a contributor needs there instead. Prefer staging explicit paths over
 `git add -A`, which sweeps this kind of local state into a PR.
 
+### Internals
+
+CLI subprocess execution is centralized in `llmjury/cliproc.py`: one `run_cli` helper
+owns the run-with-timeout mechanics (injected runner, captured text output,
+`TimeoutExpired`/`OSError` classification) for `CodexBackend`, `GrokBackend`,
+`CodexDelegator`, and `ClaudePlanner`, while each call site keeps its own command
+construction and error messages.
+
 ## License
 
 MIT © The AI Collective

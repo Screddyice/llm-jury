@@ -14,6 +14,8 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .cliproc import run_cli
+
 
 HANDOFF_SCHEMA = {
     "type": "object",
@@ -130,20 +132,18 @@ class CodexDelegator:
                 cmd.extend(["-c", f'model_reasoning_effort="{effort}"'])
             cmd.append(DELEGATE_PROMPT.format(task=task.strip()))
 
-            try:
-                completed = self.runner(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                    timeout=self.timeout, check=False,
-                )
-            except subprocess.TimeoutExpired:
+            outcome = run_cli(self.runner, cmd, self.timeout)
+            if outcome.timed_out:
                 return DelegationResult(
                     "blocked", f"Codex timed out after {self.timeout}s", [], [],
                     ["The delegated Codex execution exceeded its timeout."], 124,
                 )
-            except OSError as exc:
+            if outcome.os_error is not None:
                 return DelegationResult(
-                    "blocked", "Codex could not be started", [], [], [str(exc)], 127,
+                    "blocked", "Codex could not be started", [], [],
+                    [str(outcome.os_error)], 127,
                 )
+            completed = outcome.completed
 
             payload = self._read_handoff(output_path, completed)
             status = payload.get("status", "blocked")

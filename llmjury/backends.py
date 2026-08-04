@@ -17,6 +17,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 from .cache import Cache
+from .cliproc import run_cli
 
 _RETRYABLE = (408, 429, 500, 502, 503, 520, 524)
 _HTTP_MSG = {401: "invalid API key", 402: "insufficient credits", 403: "forbidden"}
@@ -206,19 +207,16 @@ class CodexBackend(Backend):
             if self.reasoning_effort:
                 cmd.extend(["-c", f'model_reasoning_effort="{self.reasoning_effort}"'])
             cmd.append(prompt)
-            try:
-                completed = self.runner(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                    timeout=self.timeout, check=False,
-                )
-            except subprocess.TimeoutExpired:
+            outcome = run_cli(self.runner, cmd, self.timeout)
+            if outcome.timed_out:
                 sys.stderr.write(
                     f"[llmjury] codex {model or '(configured default)'} timed out "
                     f"after {self.timeout}s\n")
                 return ""
-            except OSError as e:
-                sys.stderr.write(f"[llmjury] cannot run Codex CLI: {e}\n")
+            if outcome.os_error is not None:
+                sys.stderr.write(f"[llmjury] cannot run Codex CLI: {outcome.os_error}\n")
                 return ""
+            completed = outcome.completed
             if completed.returncode != 0:
                 detail = (completed.stderr or "").strip().splitlines()
                 suffix = f": {detail[-1]}" if detail else ""
@@ -277,19 +275,16 @@ class GrokBackend(Backend):
             # Last, and as the value of -p, so a prompt starting with "--" is never
             # parsed as a flag.
             cmd.extend(["-p", prompt])
-            try:
-                completed = self.runner(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                    timeout=self.timeout, check=False,
-                )
-            except subprocess.TimeoutExpired:
+            outcome = run_cli(self.runner, cmd, self.timeout)
+            if outcome.timed_out:
                 sys.stderr.write(
                     f"[llmjury] grok {model or '(configured default)'} timed out "
                     f"after {self.timeout}s\n")
                 return ""
-            except OSError as e:
-                sys.stderr.write(f"[llmjury] cannot run Grok CLI: {e}\n")
+            if outcome.os_error is not None:
+                sys.stderr.write(f"[llmjury] cannot run Grok CLI: {outcome.os_error}\n")
                 return ""
+            completed = outcome.completed
             if completed.returncode != 0:
                 detail = (completed.stderr or "").strip().splitlines()
                 suffix = f": {detail[-1]}" if detail else ""
