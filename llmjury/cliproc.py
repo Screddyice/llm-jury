@@ -1,6 +1,6 @@
 """Shared CLI subprocess execution for backends, delegation, and planning.
 
-Four call sites (CodexBackend, GrokBackend, CodexDelegator, ClaudePlanner) run an
+Three call sites (CodexBackend, CodexDelegator, ClaudePlanner) run an
 external CLI the same way: injected runner, captured text output, a timeout, no
 check, and the same two failure modes. This module centralizes only that
 mechanics — every caller keeps its own command construction and its own error

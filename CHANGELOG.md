@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Remove the Grok CLI provider.** The Grok Build CLI was removed from the reference
+  host, leaving `GrokBackend`, `--backend grok`, `--frontier-backend grok`, the
+  `install-grok` skill installer, and the `GROK_BEST`/`GROK_PANEL` entries with no CLI
+  to drive. All are deleted. Codex remains the subscription-authenticated frontier
+  provider and its behaviour is unchanged. Two rules the Grok host taught this repo are
+  kept and generalized, because they are about strict-YAML hosts rather than about Grok:
+  agent `description:` must stay a quoted YAML scalar (still enforced by a test, now
+  named `test_agent_frontmatter_description_is_quoted_for_strict_yaml`), and the shipped
+  agent must carry no `model:` pin. Suite goes 78 → 70 tests, all passing.
+
 - **Refuse local panels while an iOS Simulator is booted.** The CoreSimulator stack
   measured 17.6 GB resident across 282 processes on the 36 GB reference host — cost
   the RAM preflight cannot see, because none of it belongs to Ollama. A council on

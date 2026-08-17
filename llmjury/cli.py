@@ -40,9 +40,6 @@ def _backend(name, num_ctx=None, think=False):
     if name == "codex":
         from .backends import CodexBackend
         return CodexBackend(cache_path=CACHE)
-    if name == "grok":
-        from .backends import GrokBackend
-        return GrokBackend(cache_path=CACHE)
     from .backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -197,7 +194,7 @@ def cmd_solve(a):
                     #                    internet and the ladder is unreachable too
                     #   ollama frontier  would load the very models just refused.
                     #                    Not selectable today (--frontier-backend is
-                    #                    openrouter/codex/grok); kept so that adding
+                    #                    openrouter/codex); kept so that adding
                     #                    it cannot silently re-open the hole.
                     if frontier and not report.offline and a.frontier_backend != "ollama":
                         use_panel = False
@@ -332,16 +329,6 @@ def cmd_install_codex(a):
     print(f"Codex skill {state}: {path}")
 
 
-def cmd_install_grok(a):
-    from .grok_integration import install_grok_skill
-    try:
-        path, changed = install_grok_skill(force=a.force)
-    except (FileExistsError, OSError) as exc:
-        sys.exit(f"error: {exc}")
-    state = "installed" if changed else "already current"
-    print(f"Grok skill {state}: {path}")
-
-
 def main():
     p = argparse.ArgumentParser(prog="llmjury",
                                 description="Local verified answers. Don't vote, verify.")
@@ -356,7 +343,7 @@ def main():
                    'stdin/stdout cases. With --entry-point: [{"args": [2, 3], "expected": 5}] '
                    'function-call cases (entry_point(*args) == expected)')
     s.add_argument("--backend", default="openrouter",
-                   choices=["openrouter", "ollama", "codex", "grok"])
+                   choices=["openrouter", "ollama", "codex"])
     s.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
     s.add_argument("--jobs", type=int, default=None,
                    help="concurrent generation threads across a stage "
@@ -381,9 +368,9 @@ def main():
                    "Named ladders: 'auto' (open-weight, then a proprietary top tier), "
                    "'open' (open-weight only), 'opus', 'fable'. Any other value is a provider slug")
     s.add_argument("--frontier-backend", default="openrouter",
-                   choices=["openrouter", "codex", "grok"],
-                   help="provider for --frontier (default: openrouter; codex and grok reuse "
-                   "their own CLI's auth, so escalation costs nothing beyond that subscription)")
+                   choices=["openrouter", "codex"],
+                   help="provider for --frontier (default: openrouter; codex reuses "
+                   "its own CLI's auth, so escalation costs nothing beyond that subscription)")
     s.add_argument("--brain", action="store_true",
                    help="add Shawn's fine-tuned MLX brain as an extra council panelist via an "
                    "OpenAI-compatible endpoint (default the local mlx_lm.server). It joins the "
@@ -443,11 +430,6 @@ def main():
     c = sub.add_parser("install-codex", help="install automatic Claude planning for Codex")
     c.add_argument("--force", action="store_true", help="replace a differing existing skill")
     c.set_defaults(func=cmd_install_codex)
-
-    g = sub.add_parser("install-grok",
-                       help="install the LLM-Jury orchestration skill for the Grok CLI")
-    g.add_argument("--force", action="store_true", help="replace a differing existing skill")
-    g.set_defaults(func=cmd_install_grok)
 
     a = p.parse_args()
     a.func(a)
