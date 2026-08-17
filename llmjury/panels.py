@@ -55,12 +55,6 @@ LOCAL_BEST = "gemma3:12b"
 CODEX_BEST = os.environ.get("LLMJURY_CODEX_MODEL", "gpt-5.6-sol")
 CODEX_PANEL = [CODEX_BEST]
 
-# Grok is the same shape as Codex: a single authenticated frontier provider, not a
-# diverse council. Its value is that the Grok CLI's own session auth covers it, so
-# inside a Grok session this is the escalation tier that spends no OpenRouter credit.
-GROK_BEST = os.environ.get("LLMJURY_GROK_MODEL", "grok-4.5")
-GROK_PANEL = [GROK_BEST]
-
 # Verifier-gated OpenRouter escalation. These are deliberately ordered by role,
 # not fanned out on every task: Flash is the low-cost first cloud recovery, then
 # Pro is the benchmark-backed accuracy tier for the genuinely hard remainder.
@@ -97,6 +91,4 @@ def default_panel(backend_name):
         return "demo-weak", ["demo-weak", "demo-council"]
     if backend_name == "codex":
         return CODEX_BEST, CODEX_PANEL
-    if backend_name == "grok":
-        return GROK_BEST, GROK_PANEL
     return CLOUD_BEST, CLOUD_PANEL
