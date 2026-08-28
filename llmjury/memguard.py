@@ -35,8 +35,10 @@ import json
 import os
 import platform
 import subprocess
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 GB = 1024 ** 3
 
@@ -76,6 +78,18 @@ SIMULATOR_OVERRIDE_ENV = "LLMJURY_ALLOW_SIMULATOR"
 ROUTER_STATE_PATH = os.environ.get(
     "LLMJURY_ROUTER_STATE") or os.path.expanduser("~/.backdoor/failover-state.json")
 ROUTER_OVERRIDE_ENV = "LLMJURY_ALLOW_ROUTER_FAILOVER"
+
+# Backdoor publishes one short-lived file per process and client route before it
+# asks Ollama to load the exclusive 27B model. The lease closes the race between
+# request admission and `/api/ps` showing the newly resident model. Residency is
+# checked as a second source of truth after the lease expires.
+COMPUTE_LEASE_DIR = os.environ.get(
+    "LLMJURY_COMPUTE_LEASE_DIR"
+) or os.path.expanduser("~/.backdoor/compute-leases")
+EXCLUSIVE_MODELS = {"qwen3.8:27b-obliterated"}
+DEFAULT_OLLAMA_HOST = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+if not DEFAULT_OLLAMA_HOST.startswith("http"):
+    DEFAULT_OLLAMA_HOST = f"http://{DEFAULT_OLLAMA_HOST}"
 
 
 def _env_float(name, default):
@@ -242,6 +256,57 @@ def loaded_bytes(host):
         if isinstance(name, str) and isinstance(size, int):
             by_model[name] = size
     return sum(by_model.values()), by_model
+
+
+def _exclusive_model(tag):
+    if not isinstance(tag, str):
+        return False
+    normalized = tag.removesuffix(":latest")
+    return normalized in EXCLUSIVE_MODELS
+
+
+def exclusive_compute(host=None):
+    """Return whether another route owns all model compute on this host.
+
+    This is an absolute process gate, not a RAM estimate. Callers must not start
+    a local council or a remote frontier while it is active. Lease and residency
+    probes fail open when their state cannot be read, matching the router guard.
+    """
+
+    now = time.time()
+    try:
+        lease_paths = Path(COMPUTE_LEASE_DIR).glob("*.json")
+        for path in lease_paths:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict) or not data.get("active"):
+                continue
+            if not _exclusive_model(data.get("model")):
+                continue
+            expires_at = data.get("expires_at")
+            if not isinstance(expires_at, (int, float)) or expires_at <= now:
+                continue
+            pid = data.get("pid")
+            if isinstance(pid, int) and not _pid_alive(pid):
+                continue
+            source = data.get("source")
+            source = source if isinstance(source, str) and source else "backdoor"
+            return True, f"{source} owns {data['model']}"
+    except OSError:
+        pass
+
+    _, resident = loaded_bytes(host or DEFAULT_OLLAMA_HOST)
+    for model in resident:
+        if _exclusive_model(model):
+            return True, f"{model} is resident in Ollama"
+
+    failing_over, reason = router_failover()
+    if failing_over:
+        because = f" ({reason})" if reason else ""
+        return True, f"backdoor failover is active{because}"
+    return False, ""
 
 
 def estimate_resident(disk_bytes, cells):

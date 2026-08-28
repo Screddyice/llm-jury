@@ -105,6 +105,15 @@ def _func_cases(raw):
 
 def cmd_solve(a):
     _refuse_root()
+    from .memguard import exclusive_compute
+    exclusive, owner = exclusive_compute()
+    if exclusive:
+        sys.exit(
+            "error: llm-jury is standing down; exclusive 27B compute is active.\n"
+            f"owner: {owner}\n"
+            "The local council and every frontier provider, including OpenRouter, "
+            "remain disabled until the 27B route releases the host."
+        )
     task = _read(a.task)
     if a.cases:
         try:

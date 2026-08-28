@@ -1155,6 +1155,101 @@ def test_router_override_lets_the_council_run_anyway():
         restore()
 
 
+def test_exclusive_compute_detects_live_27b_lease_and_residency():
+    from llmjury import memguard
+
+    saved = (
+        memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
+        memguard.router_failover, memguard.time.time,
+    )
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            memguard.COMPUTE_LEASE_DIR = td
+            memguard.time.time = lambda: 1_000.0
+            memguard.router_failover = lambda path=None: (False, "")
+            Path(td, "lease.json").write_text(json.dumps({
+                "active": True,
+                "model": "qwen3.8:27b-obliterated",
+                "source": "claude-explicit",
+                "expires_at": 1_600.0,
+                "pid": os.getpid(),
+            }), encoding="utf-8")
+            memguard.loaded_bytes = lambda host: (0, {})
+            assert memguard.exclusive_compute() == (
+                True, "claude-explicit owns qwen3.8:27b-obliterated"
+            )
+
+            Path(td, "lease.json").unlink()
+            memguard.loaded_bytes = lambda host: (
+                17_000_000_000,
+                {"qwen3.8:27b-obliterated": 17_000_000_000},
+            )
+            assert memguard.exclusive_compute() == (
+                True, "qwen3.8:27b-obliterated is resident in Ollama"
+            )
+    finally:
+        (
+            memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
+            memguard.router_failover, memguard.time.time,
+        ) = saved
+
+
+def test_exclusive_compute_ignores_expired_or_dead_leases():
+    from llmjury import memguard
+
+    saved = (
+        memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
+        memguard.router_failover, memguard.time.time,
+    )
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            memguard.COMPUTE_LEASE_DIR = td
+            memguard.time.time = lambda: 2_000.0
+            memguard.loaded_bytes = lambda host: (0, {})
+            memguard.router_failover = lambda path=None: (False, "")
+            for name, payload in {
+                "expired.json": {
+                    "active": True, "model": "qwen3.8:27b-obliterated",
+                    "source": "claude-explicit", "expires_at": 1_999.0,
+                    "pid": os.getpid(),
+                },
+                "dead.json": {
+                    "active": True, "model": "qwen3.8:27b-obliterated",
+                    "source": "codex-failover", "expires_at": 2_600.0,
+                    "pid": 4_194_304,
+                },
+            }.items():
+                Path(td, name).write_text(json.dumps(payload), encoding="utf-8")
+            assert memguard.exclusive_compute() == (False, "")
+    finally:
+        (
+            memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
+            memguard.router_failover, memguard.time.time,
+        ) = saved
+
+
+def test_cli_blocks_openrouter_before_backend_creation_during_exclusive_compute():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from llmjury.cli import cmd_solve
+
+    args = SimpleNamespace(task="unused")
+    with patch("llmjury.cli._refuse_root"), patch(
+        "llmjury.memguard.exclusive_compute",
+        return_value=(True, "codex-failover owns qwen3.8:27b-obliterated"),
+    ), patch(
+        "llmjury.cli._backend",
+        side_effect=AssertionError("OpenRouter backend must not be constructed"),
+    ) as backend:
+        try:
+            cmd_solve(args)
+            assert False, "exclusive 27B ownership must stop the entire run"
+        except SystemExit as error:
+            assert "standing down" in str(error)
+            assert "codex-failover" in str(error)
+        backend.assert_not_called()
+
+
 # ── Frontier fallback when the panel cannot load ─────────────────────────────
 
 
