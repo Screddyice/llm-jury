@@ -26,3 +26,4 @@ def _isolate_router_state(tmp_path, monkeypatch):
     monkeypatch.setattr(
         memguard, "ROUTER_STATE_PATH", str(tmp_path / "failover-state.json")
     )
+    monkeypatch.setattr(memguard, "COMPUTE_LEASE_DIR", str(tmp_path / "compute-leases"))

@@ -75,6 +75,8 @@ def test_cli_rejects_invalid_tests_before_constructing_backend():
             task=str(task), tests=str(tests), cases=None, entry_point=None,
         )
         with patch(
+            "llmjury.memguard.exclusive_compute", return_value=(False, "")
+        ), patch(
             "llmjury.cli._backend",
             side_effect=AssertionError("backend constructed before verifier validation"),
         ) as backend:
@@ -1073,35 +1075,35 @@ def _router_state(tmpdir, **payload):
     return str(path)
 
 
-def test_router_failover_refuses_and_marks_the_run_offline():
+def test_router_failover_refuses_and_marks_the_run_terminal():
     from llmjury import memguard
     restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
                            router=(True, "ConnectError"))
     try:
         report = memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2)
         assert not report.ok
-        assert report.router and report.offline, (
-            "a router refusal must be flagged offline so the CLI does not "
-            "escalate to a cloud ladder that is equally unreachable")
-        assert "offline" in report.message()
+        assert report.router and report.terminal, (
+            "a router refusal must be terminal so the CLI does not escalate "
+            "to a cloud ladder while Qwen owns compute")
+        assert "exclusive ownership" in report.message()
     finally:
         restore()
 
 
-def test_ram_and_simulator_refusals_are_not_offline():
-    """Only the router refusal blocks escalation; the others leave cloud usable."""
+def test_ram_and_simulator_refusals_are_not_terminal():
+    """Only exclusive router ownership blocks every frontier."""
     from llmjury import memguard
     restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED},
                            simulator=(True, int(17.6 * 1e9)))
     try:
-        assert memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).offline is False
+        assert memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).terminal is False
     finally:
         restore()
     restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
     try:
         over = memguard.check(["phi4", "gemma3:12b", "llama3.1:8b"],
                               num_ctx=8192, parallel=4)
-        assert not over.ok and over.offline is False
+        assert not over.ok and over.terminal is False
     finally:
         restore()
 
@@ -1136,16 +1138,14 @@ def test_router_state_from_a_dead_writer_is_ignored():
         assert memguard.router_failover(path) == (False, "")
 
 
-def test_router_override_lets_the_council_run_anyway():
+def test_router_override_cannot_bypass_exclusive_compute():
     from llmjury import memguard
     restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
                            router=(True, "ConnectError"))
-    env = memguard.ROUTER_OVERRIDE_ENV
+    env = "LLMJURY_ALLOW_ROUTER_FAILOVER"
     saved = os.environ.get(env)
     try:
         os.environ[env] = "1"
-        assert memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).ok
-        os.environ[env] = "0"
         assert not memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).ok
     finally:
         if saved is None:

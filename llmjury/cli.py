@@ -199,19 +199,19 @@ def cmd_solve(a):
                     # no memory — perfectly usable. Drop the panel and escalate
                     # rather than killing a run that still has a safe path to a
                     # verified answer. Two refusals are not like that:
-                    #   report.offline   the router failed over, so there is no
-                    #                    internet and the ladder is unreachable too
+                    #   report.terminal  Backdoor assigned all model compute to Qwen,
+                    #                    so local and frontier calls must both stop
                     #   ollama frontier  would load the very models just refused.
                     #                    Not selectable today (--frontier-backend is
                     #                    openrouter/codex); kept so that adding
                     #                    it cannot silently re-open the hole.
-                    if frontier and not report.offline and a.frontier_backend != "ollama":
+                    if frontier and not report.terminal and a.frontier_backend != "ollama":
                         use_panel = False
                         sys.stderr.write(
                             "[llmjury] skipping the local council; escalating straight to "
                             + " -> ".join(frontier) + f" on {a.frontier_backend} "
                             "(remote, needs no memory on this host)\n")
-                    elif report.offline:
+                    elif report.terminal:
                         sys.exit(f"error: llm-jury is standing down.\nhint: {report.hint()}")
                     else:
                         sys.exit(
