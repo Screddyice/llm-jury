@@ -608,3 +608,23 @@ messages.
 ## License
 
 MIT © The AI Collective
+
+## Working in this repo
+
+Python `>=3.9`, managed with **uv** (`uv.lock` committed). The package installs the
+`llmjury` and `jury` console scripts. No Node toolchain.
+
+```bash
+uv sync
+uv run pytest
+uv run llmjury solve --task <f> --tests <f> --backend ollama --frontier auto
+```
+
+`solve` requires a verifier (`--tests`, `--cases`, or `--entry-point`) and refuses to
+answer without one — that constraint is the product, not a limitation to work around.
+
+**Before changing the council, read `BENCHMARKS.md`.** Resident memory runs about 2x
+on-disk and KV is charged `num_ctx x OLLAMA_NUM_PARALLEL`. The original panel measured
+34 GB resident on a 36 GB Mac and panicked the kernel twice; the package now refuses a
+panel that will not fit. Substitute within a lab, never swap labs — a test enforces the
+cross-lineage shape. Agent instructions live in `CLAUDE.md`.
