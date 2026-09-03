@@ -58,10 +58,13 @@ class Backend:
             self.name, cache_model, temperature, max_tokens, i, prompt) if self.cache else None
         if ck is not None:
             hit = self.cache.get(ck)
-            if hit is not None:
+            # Empty text means the provider failed before producing a candidate.
+            # Older releases cached that outage forever, so ignore existing empty
+            # entries as well as refusing to write new ones below.
+            if hit:
                 return hit
         txt = self._one(model, prompt, temperature, max_tokens)
-        if ck is not None:
+        if ck is not None and txt:
             self.cache.put(ck, txt)
         return txt
 
