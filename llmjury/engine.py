@@ -39,7 +39,8 @@ class Result:
 class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
                  k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
-                 route=None, workers=None, frontier_max_tokens=None, use_panel=True):
+                 route=None, frontier_route=None, workers=None, frontier_max_tokens=None,
+                 use_panel=True):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -63,6 +64,9 @@ class Engine:
         # fine-tuned MLX brain on an OpenAI-compatible endpoint — sit in the council
         # alongside the default panel. Empty by default, so the common path is unchanged.
         self.route = route or {}
+        # Frontier overrides stay separate so a rescue model name cannot accidentally
+        # reroute a same-named local panelist.
+        self.frontier_route = frontier_route or {}
         # Stages 1-2 (best-of-k, then the council) run the panel on `backend`.
         # `use_panel=False` skips both and starts at the frontier ladder. That is for
         # a caller which has determined the panel cannot be loaded SAFELY — see the
@@ -110,6 +114,9 @@ class Engine:
         def backend_for(m):
             return self.route.get(m, self.backend)
 
+        def frontier_backend_for(m):
+            return self.frontier_route.get(m, self.frontier_backend)
+
         def run_stage(ex, pairs, stage, max_tokens=None):
             for fut, model in _in_completion_order(
                     self._submit(ex, pairs, prompt, max_tokens)):
@@ -143,7 +150,7 @@ class Engine:
             # hard minority, not on every problem.
             if escalate and self.frontier:
                 for model in self.frontier:
-                    r = run_stage(ex, [(model, self.frontier_backend)], "frontier",
+                    r = run_stage(ex, [(model, frontier_backend_for(model))], "frontier",
                                   self.frontier_max_tokens)
                     if r:
                         return r

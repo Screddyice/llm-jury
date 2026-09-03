@@ -383,11 +383,17 @@ slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a mo
 available to the installed Codex CLI and uses Codex authentication. OpenRouter is not
 coupled to Anthropic: any compatible OpenRouter model slug can be used.
 
-Because Codex escalates on its own subscription auth rather than per-token billing, it is
-the cheapest escalation available when you are already working inside that CLI — reach
-for it before a metered OpenRouter ladder. The named ladders below (`auto`, `open`,
-`opus`, `fable`) resolve to OpenRouter slugs and are rejected with a clear error if
-paired with `--frontier-backend codex`, rather than handing it a slug it cannot serve.
+Inside a Codex session, `--frontier auto` keeps the ordered OpenRouter ladder and adds
+the authenticated Codex model as its final rescue. An exhausted OpenRouter balance or
+provider outage can no longer end the run while Codex remains available. Every candidate
+still has to pass the same verifier. `--frontier open`, `opus`, `fable`, and explicit
+model slugs keep their stated provider boundary; named OpenRouter ladders remain invalid
+with `--frontier-backend codex` because Codex cannot serve OpenRouter slugs.
+
+The completion cache stores generated candidates, not transport failures. Empty results
+from timeouts, account errors, and unavailable routes are retried on the next run. This
+also repairs empty cache entries written by older releases without deleting valid cached
+generations.
 
 ### Fitting the council in RAM
 
