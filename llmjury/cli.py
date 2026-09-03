@@ -41,6 +41,9 @@ def _backend(name, num_ctx=None, think=False):
     if name == "codex":
         from .backends import CodexBackend
         return CodexBackend(cache_path=CACHE)
+    if name == "claude":
+        from .backends import ClaudeBackend
+        return ClaudeBackend(cache_path=CACHE)
     from .backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -81,6 +84,18 @@ def _codex_frontier_rescue(value, backend_name):
         return None
     from .panels import CODEX_BEST
     return CODEX_BEST
+
+
+def _claude_frontier_rescue(value, backend_name):
+    """Return the authenticated Claude rescue model inside Claude Code."""
+    if value != "auto" or backend_name != "openrouter":
+        return None
+    if os.environ.get("CLAUDECODE", "").strip() in ("", "0"):
+        return None
+    if not shutil.which("claude"):
+        return None
+    from .panels import CLAUDE_BEST
+    return CLAUDE_BEST
 
 
 def _func_cases(raw):
@@ -174,19 +189,24 @@ def cmd_solve(a):
         frontier = _frontier_models(a.frontier, a.frontier_backend)
     except ValueError as e:
         sys.exit(f"error: {e}")
-    rescue_model = _codex_frontier_rescue(a.frontier, a.frontier_backend)
+    claude_rescue = _claude_frontier_rescue(a.frontier, a.frontier_backend)
+    codex_rescue = _codex_frontier_rescue(a.frontier, a.frontier_backend)
+    rescue_model = claude_rescue or codex_rescue
+    rescue_backend = "claude" if claude_rescue else "codex" if codex_rescue else None
     frontier_route = {}
     if rescue_model:
         frontier.append(rescue_model)
-        frontier_route[rescue_model] = _backend("codex")
+        frontier_route[rescue_model] = _backend(rescue_backend)
     from .panels import FRONTIER_ALIASES
     if a.frontier in FRONTIER_ALIASES:
         sys.stderr.write(
             f"[llmjury] {a.frontier} route: local council -> "
             + " -> ".join(frontier) + " (verifier-gated)\n")
     if rescue_model:
+        host = "Claude Code" if rescue_backend == "claude" else "Codex"
+        provider = "Claude" if rescue_backend == "claude" else "Codex"
         sys.stderr.write(
-            "[llmjury] Codex session detected; authenticated Codex is the final "
+            f"[llmjury] {host} session detected; authenticated {provider} is the final "
             "rescue if OpenRouter produces no verified candidate\n")
     fb = None
     if frontier:
@@ -226,7 +246,7 @@ def cmd_solve(a):
                     if frontier and not report.offline and a.frontier_backend != "ollama":
                         use_panel = False
                         frontier_providers = (
-                            f"{a.frontier_backend}, then codex"
+                            f"{a.frontier_backend}, then {rescue_backend}"
                             if rescue_model else a.frontier_backend
                         )
                         sys.stderr.write(

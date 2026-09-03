@@ -55,6 +55,10 @@ LOCAL_BEST = "gemma3:12b"
 CODEX_BEST = os.environ.get("LLMJURY_CODEX_MODEL", "gpt-5.6-sol")
 CODEX_PANEL = [CODEX_BEST]
 
+# Claude Code is also a single authenticated frontier provider. It is used as
+# the final rescue for `--frontier auto` when the caller is a Claude Code session.
+CLAUDE_BEST = os.environ.get("LLMJURY_CLAUDE_MODEL", "opus")
+
 # Verifier-gated OpenRouter escalation. These are deliberately ordered by role,
 # not fanned out on every task: Flash is the low-cost first cloud recovery, then
 # Pro is the benchmark-backed accuracy tier for the genuinely hard remainder.
