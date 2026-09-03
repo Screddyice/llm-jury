@@ -352,12 +352,52 @@ def test_codex_backend_runs_ephemeral_read_only_generation():
     assert kw["timeout"] == 600 and not kw["check"]
 
 
+def test_claude_backend_runs_ephemeral_tool_free_generation():
+    from llmjury.backends import ClaudeBackend
+
+    calls = []
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw, os.path.isdir(kw["cwd"])))
+        return subprocess.CompletedProcess(cmd, 0, stdout=_GOOD + "\n", stderr="")
+
+    old = os.environ.get("CLAUDECODE")
+    os.environ["CLAUDECODE"] = "1"
+    try:
+        backend = ClaudeBackend(runner=runner)
+        assert backend.complete("opus", "write add", n=1) == [_GOOD]
+    finally:
+        if old is None:
+            os.environ.pop("CLAUDECODE", None)
+        else:
+            os.environ["CLAUDECODE"] = old
+
+    cmd, kw, cwd_existed = calls[0]
+    assert cmd[:2] == ["claude", "--print"]
+    assert "--safe-mode" in cmd and "--no-session-persistence" in cmd
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
+    assert cmd[cmd.index("--permission-prompts") + 1] == "none"
+    assert cmd[cmd.index("--model") + 1] == "opus"
+    assert cmd[-1] == "write add"
+    assert kw["env"].get("CLAUDECODE") is None
+    assert cwd_existed and kw["timeout"] == 600 and not kw["check"]
+
+
 def test_cli_backend_builds_codex_provider():
     from unittest.mock import patch
     from llmjury.cli import _backend
 
     with patch("llmjury.backends.shutil.which", return_value="/usr/local/bin/codex"):
         assert _backend("codex").name == "codex"
+
+
+def test_cli_backend_builds_claude_provider():
+    from unittest.mock import patch
+    from llmjury.cli import _backend
+
+    with patch("llmjury.backends.shutil.which", return_value="/usr/local/bin/claude"):
+        assert _backend("claude").name == "claude"
 
 
 def test_cli_backend_can_enable_ollama_thinking():
@@ -401,6 +441,28 @@ def test_cli_auto_frontier_does_not_invent_codex_outside_a_codex_session():
     with patch.dict(os.environ, clean_env, clear=True), \
             patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/codex"):
         assert _codex_frontier_rescue("auto", "openrouter") is None
+
+
+def test_cli_auto_frontier_uses_authenticated_claude_as_last_resort_in_claude_code():
+    from unittest.mock import patch
+    from llmjury.cli import _claude_frontier_rescue
+    from llmjury.panels import CLAUDE_BEST
+
+    with patch.dict(os.environ, {"CLAUDECODE": "1"}, clear=False), \
+            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/claude"):
+        assert _claude_frontier_rescue("auto", "openrouter") == CLAUDE_BEST
+        assert _claude_frontier_rescue("open", "openrouter") is None
+        assert _claude_frontier_rescue("auto", "claude") is None
+
+
+def test_cli_auto_frontier_does_not_invent_claude_outside_claude_code():
+    from unittest.mock import patch
+    from llmjury.cli import _claude_frontier_rescue
+
+    clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    with patch.dict(os.environ, clean_env, clear=True), \
+            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/claude"):
+        assert _claude_frontier_rescue("auto", "openrouter") is None
 
 
 def test_auto_frontier_tries_open_weight_before_the_paid_top_tier():

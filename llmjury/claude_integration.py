@@ -75,6 +75,9 @@ not a vote — decides what survives. "Don't vote, verify."
            [--entry-point NAME] --backend ollama --frontier auto
 
    Omit `--frontier auto` when the user asked to stay local/offline.
+   In Claude Code, `auto` tries the OpenRouter ladder first and then launches an
+   authenticated, tool-free Claude CLI call as the final rescue. The rescue runs in
+   safe mode outside the repository and still must pass the same oracle.
 4. **Report honestly.** On success, return the verified code verbatim plus the
    `stage / model / attempts` line. On failure, report the verifier output as a
    failure — never hand-write a "fixed" answer and present it as verified.

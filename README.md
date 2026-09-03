@@ -239,11 +239,12 @@ The recommended Codex workflow keeps candidate generation local until the verifi
 the local council needs help:
 
 ```text
-Codex frames the task and oracle
+The host agent frames the task and oracle
   → Phi-4 on local Ollama
   → Gemma 3 12B + Llama 3.1 8B only if Phi-4 fails
   → DeepSeek V4 Flash on OpenRouter only if the local council fails
   → DeepSeek V4 Pro only if Flash also fails
+  → the host's authenticated Codex or Claude CLI if OpenRouter fails
   → return the first candidate that passes the oracle
 ```
 
@@ -377,18 +378,24 @@ read as a separately measured benchmark result until that exact policy is reprod
   against reading unrelated host files.
   Jury calls default to low reasoning effort because the independent verifier supplies
   the acceptance gate; Python callers can override `CodexBackend(reasoning_effort=...)`.
+- **Claude Code CLI (authenticated Anthropic provider)** — used as the last rescue for
+  `--frontier auto` inside Claude Code. It removes the parent-session nesting marker,
+  starts in a temporary directory with safe mode, disables tools and permission prompts,
+  and keeps session persistence off. Set `LLMJURY_CLAUDE_MODEL` to change the default
+  from `opus`.
 
 The frontier provider is explicit. `--frontier-backend openrouter` accepts OpenRouter
 slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a model
 available to the installed Codex CLI and uses Codex authentication. OpenRouter is not
 coupled to Anthropic: any compatible OpenRouter model slug can be used.
 
-Inside a Codex session, `--frontier auto` keeps the ordered OpenRouter ladder and adds
-the authenticated Codex model as its final rescue. An exhausted OpenRouter balance or
-provider outage can no longer end the run while Codex remains available. Every candidate
-still has to pass the same verifier. `--frontier open`, `opus`, `fable`, and explicit
-model slugs keep their stated provider boundary; named OpenRouter ladders remain invalid
-with `--frontier-backend codex` because Codex cannot serve OpenRouter slugs.
+Inside Codex or Claude Code, `--frontier auto` keeps the ordered OpenRouter ladder and
+adds the host's authenticated model as its final rescue. An exhausted OpenRouter balance
+or provider outage can no longer end the run while the host provider remains available.
+Every candidate still has to pass the same verifier. `--frontier open`, `opus`, `fable`,
+and explicit model slugs keep their stated provider boundary; named OpenRouter ladders
+remain invalid with `--frontier-backend codex` because Codex cannot serve OpenRouter
+slugs.
 
 The completion cache stores generated candidates, not transport failures. Empty results
 from timeouts, account errors, and unavailable routes are retried on the next run. This

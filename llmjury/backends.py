@@ -230,6 +230,70 @@ class CodexBackend(Backend):
             return (completed.stdout or "").strip()
 
 
+class ClaudeBackend(Backend):
+    """Generate candidates through the authenticated Claude Code CLI.
+
+    Claude Code forbids a nested invocation while ``CLAUDECODE`` is present. The
+    child removes only that marker, keeps the caller's authentication, disables
+    customizations and tools, and runs outside the repository in a temporary cwd.
+    """
+    name = "claude"
+
+    def __init__(self, executable="claude", timeout=600, effort="low",
+                 runner=None, **kw):
+        super().__init__(**kw)
+        self.executable = executable
+        self.timeout = timeout
+        self.effort = effort
+        self.runner = runner or subprocess.run
+        if runner is None and not shutil.which(executable):
+            raise RuntimeError(
+                "Claude Code not found. Install and authenticate Claude Code, or use "
+                "--backend ollama/openrouter.")
+
+    def _one(self, model, prompt, temperature, max_tokens):
+        # Claude Code owns sampling and output length. The verifier still owns
+        # acceptance, matching the Codex CLI backend's contract.
+        with tempfile.TemporaryDirectory(prefix="llmjury-claude-") as workdir:
+            cmd = [
+                self.executable, "--print", "--safe-mode",
+                "--output-format", "text", "--no-session-persistence",
+                "--permission-mode", "dontAsk",
+                "--permission-prompts", "none",
+                "--tools", "",
+            ]
+            if self.effort:
+                cmd.extend(["--effort", self.effort])
+            if model:
+                cmd.extend(["--model", model])
+            cmd.append(prompt)
+
+            child_env = os.environ.copy()
+            child_env.pop("CLAUDECODE", None)
+
+            def invoke(command, **kwargs):
+                return self.runner(command, env=child_env, **kwargs)
+
+            outcome = run_cli(invoke, cmd, self.timeout, cwd=workdir)
+            if outcome.timed_out:
+                sys.stderr.write(
+                    f"[llmjury] claude {model or '(configured default)'} timed out "
+                    f"after {self.timeout}s\n")
+                return ""
+            if outcome.os_error is not None:
+                sys.stderr.write(f"[llmjury] cannot run Claude Code: {outcome.os_error}\n")
+                return ""
+            completed = outcome.completed
+            if completed.returncode != 0:
+                detail = (completed.stderr or "").strip().splitlines()
+                suffix = f": {detail[-1]}" if detail else ""
+                sys.stderr.write(
+                    f"[llmjury] claude {model or '(configured default)'} exited "
+                    f"{completed.returncode}{suffix}\n")
+                return ""
+            return (completed.stdout or "").strip()
+
+
 class DemoBackend(Backend):
     """Offline, canned backend so `llmjury demo` runs with no API key and no Ollama —
     while still exercising the REAL generate->verify->select->escalate pipeline and the
