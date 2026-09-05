@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import argparse
+import shutil
 from pathlib import Path
 
 from . import __version__
@@ -40,6 +41,9 @@ def _backend(name, num_ctx=None, think=False):
     if name == "codex":
         from .backends import CodexBackend
         return CodexBackend(cache_path=CACHE)
+    if name == "claude":
+        from .backends import ClaudeBackend
+        return ClaudeBackend(cache_path=CACHE)
     from .backends import OpenRouterBackend
     return OpenRouterBackend(cache_path=CACHE)
 
@@ -63,6 +67,35 @@ def _frontier_models(value, backend_name):
         raise ValueError(
             f"--frontier {value} requires --frontier-backend openrouter")
     return list(FRONTIER_ALIASES[value])
+
+
+def _codex_frontier_rescue(value, backend_name):
+    """Return the authenticated Codex rescue model for `auto` inside Codex.
+
+    OpenRouter remains the ordered first choice. A Codex-hosted run already has a
+    separate authenticated provider available, so it can recover after account,
+    route, or provider failures without weakening the verifier gate.
+    """
+    if value != "auto" or backend_name != "openrouter":
+        return None
+    if not (os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")):
+        return None
+    if not shutil.which("codex"):
+        return None
+    from .panels import CODEX_BEST
+    return CODEX_BEST
+
+
+def _claude_frontier_rescue(value, backend_name):
+    """Return the authenticated Claude rescue model inside Claude Code."""
+    if value != "auto" or backend_name != "openrouter":
+        return None
+    if os.environ.get("CLAUDECODE", "").strip() in ("", "0"):
+        return None
+    if not shutil.which("claude"):
+        return None
+    from .panels import CLAUDE_BEST
+    return CLAUDE_BEST
 
 
 def _func_cases(raw):
@@ -156,11 +189,25 @@ def cmd_solve(a):
         frontier = _frontier_models(a.frontier, a.frontier_backend)
     except ValueError as e:
         sys.exit(f"error: {e}")
+    claude_rescue = _claude_frontier_rescue(a.frontier, a.frontier_backend)
+    codex_rescue = _codex_frontier_rescue(a.frontier, a.frontier_backend)
+    rescue_model = claude_rescue or codex_rescue
+    rescue_backend = "claude" if claude_rescue else "codex" if codex_rescue else None
+    frontier_route = {}
+    if rescue_model:
+        frontier.append(rescue_model)
+        frontier_route[rescue_model] = _backend(rescue_backend)
     from .panels import FRONTIER_ALIASES
     if a.frontier in FRONTIER_ALIASES:
         sys.stderr.write(
             f"[llmjury] {a.frontier} route: local council -> "
             + " -> ".join(frontier) + " (verifier-gated)\n")
+    if rescue_model:
+        host = "Claude Code" if rescue_backend == "claude" else "Codex"
+        provider = "Claude" if rescue_backend == "claude" else "Codex"
+        sys.stderr.write(
+            f"[llmjury] {host} session detected; authenticated {provider} is the final "
+            "rescue if OpenRouter produces no verified candidate\n")
     fb = None
     if frontier:
         fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
@@ -198,9 +245,13 @@ def cmd_solve(a):
                     #                    it cannot silently re-open the hole.
                     if frontier and not report.offline and a.frontier_backend != "ollama":
                         use_panel = False
+                        frontier_providers = (
+                            f"{a.frontier_backend}, then {rescue_backend}"
+                            if rescue_model else a.frontier_backend
+                        )
                         sys.stderr.write(
                             "[llmjury] skipping the local council; escalating straight to "
-                            + " -> ".join(frontier) + f" on {a.frontier_backend} "
+                            + " -> ".join(frontier) + f" on {frontier_providers} "
                             "(remote, needs no memory on this host)\n")
                     elif report.offline:
                         sys.exit(f"error: llm-jury is standing down.\nhint: {report.hint()}")
@@ -220,6 +271,7 @@ def cmd_solve(a):
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
                frontier=frontier, frontier_backend=fb, route=route,
+               frontier_route=frontier_route,
                use_panel=use_panel).solve(task, verifier)
 
     if a.json:

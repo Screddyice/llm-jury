@@ -352,12 +352,52 @@ def test_codex_backend_runs_ephemeral_read_only_generation():
     assert kw["timeout"] == 600 and not kw["check"]
 
 
+def test_claude_backend_runs_ephemeral_tool_free_generation():
+    from llmjury.backends import ClaudeBackend
+
+    calls = []
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw, os.path.isdir(kw["cwd"])))
+        return subprocess.CompletedProcess(cmd, 0, stdout=_GOOD + "\n", stderr="")
+
+    old = os.environ.get("CLAUDECODE")
+    os.environ["CLAUDECODE"] = "1"
+    try:
+        backend = ClaudeBackend(runner=runner)
+        assert backend.complete("opus", "write add", n=1) == [_GOOD]
+    finally:
+        if old is None:
+            os.environ.pop("CLAUDECODE", None)
+        else:
+            os.environ["CLAUDECODE"] = old
+
+    cmd, kw, cwd_existed = calls[0]
+    assert cmd[:2] == ["claude", "--print"]
+    assert "--safe-mode" in cmd and "--no-session-persistence" in cmd
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
+    assert cmd[cmd.index("--permission-prompts") + 1] == "none"
+    assert cmd[cmd.index("--model") + 1] == "opus"
+    assert cmd[-1] == "write add"
+    assert kw["env"].get("CLAUDECODE") is None
+    assert cwd_existed and kw["timeout"] == 600 and not kw["check"]
+
+
 def test_cli_backend_builds_codex_provider():
     from unittest.mock import patch
     from llmjury.cli import _backend
 
     with patch("llmjury.backends.shutil.which", return_value="/usr/local/bin/codex"):
         assert _backend("codex").name == "codex"
+
+
+def test_cli_backend_builds_claude_provider():
+    from unittest.mock import patch
+    from llmjury.cli import _backend
+
+    with patch("llmjury.backends.shutil.which", return_value="/usr/local/bin/claude"):
+        assert _backend("claude").name == "claude"
 
 
 def test_cli_backend_can_enable_ollama_thinking():
@@ -378,6 +418,51 @@ def test_cli_auto_frontier_resolves_open_source_ladder():
         assert False, "auto must reject non-OpenRouter frontier backends"
     except ValueError:
         pass
+
+
+def test_cli_auto_frontier_uses_authenticated_codex_as_last_resort_in_codex():
+    from unittest.mock import patch
+    from llmjury.cli import _codex_frontier_rescue
+    from llmjury.panels import CODEX_BEST
+
+    with patch.dict(os.environ, {"CODEX_THREAD_ID": "thread"}, clear=False), \
+            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/codex"):
+        assert _codex_frontier_rescue("auto", "openrouter") == CODEX_BEST
+        assert _codex_frontier_rescue("open", "openrouter") is None
+        assert _codex_frontier_rescue("auto", "codex") is None
+
+
+def test_cli_auto_frontier_does_not_invent_codex_outside_a_codex_session():
+    from unittest.mock import patch
+    from llmjury.cli import _codex_frontier_rescue
+
+    clean_env = {k: v for k, v in os.environ.items()
+                 if k not in ("CODEX_THREAD_ID", "CODEX_SESSION_ID")}
+    with patch.dict(os.environ, clean_env, clear=True), \
+            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/codex"):
+        assert _codex_frontier_rescue("auto", "openrouter") is None
+
+
+def test_cli_auto_frontier_uses_authenticated_claude_as_last_resort_in_claude_code():
+    from unittest.mock import patch
+    from llmjury.cli import _claude_frontier_rescue
+    from llmjury.panels import CLAUDE_BEST
+
+    with patch.dict(os.environ, {"CLAUDECODE": "1"}, clear=False), \
+            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/claude"):
+        assert _claude_frontier_rescue("auto", "openrouter") == CLAUDE_BEST
+        assert _claude_frontier_rescue("open", "openrouter") is None
+        assert _claude_frontier_rescue("auto", "claude") is None
+
+
+def test_cli_auto_frontier_does_not_invent_claude_outside_claude_code():
+    from unittest.mock import patch
+    from llmjury.cli import _claude_frontier_rescue
+
+    clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    with patch.dict(os.environ, clean_env, clear=True), \
+            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/claude"):
+        assert _claude_frontier_rescue("auto", "openrouter") is None
 
 
 def test_auto_frontier_tries_open_weight_before_the_paid_top_tier():
@@ -411,6 +496,59 @@ def test_openrouter_never_returns_thinking_as_an_answer():
     assert _answer_from_reasoning(None) == ""
     stranded = "```python\ndef add(a, b):\n    return a + b\n```"
     assert _answer_from_reasoning(stranded) == stranded
+
+
+def test_backend_retries_cached_empty_provider_failures():
+    """A provider outage must not become a permanent cached response."""
+    from llmjury.backends import Backend
+
+    class FlakyBackend(Backend):
+        name = "flaky"
+
+        def __init__(self, cache_path):
+            super().__init__(cache_path=cache_path)
+            self.calls = 0
+
+        def _one(self, model, prompt, temperature, max_tokens):
+            self.calls += 1
+            return "" if self.calls == 1 else _GOOD
+
+    with tempfile.TemporaryDirectory() as td:
+        cache_path = os.path.join(td, "cache.jsonl")
+        backend = FlakyBackend(cache_path)
+        assert backend.complete("model", "prompt", n=1) == [""]
+        assert backend.complete("model", "prompt", n=1) == [_GOOD]
+        assert backend.calls == 2
+
+        with open(cache_path, encoding="utf-8") as fh:
+            cached = [json.loads(line)["v"] for line in fh]
+        assert cached == [_GOOD]
+
+
+def test_backend_ignores_empty_failures_from_an_existing_cache():
+    """Old cached outages must heal on the next successful provider call."""
+    from llmjury.backends import Backend
+    from llmjury.cache import Cache
+
+    class HealthyBackend(Backend):
+        name = "healthy"
+
+        def __init__(self, cache_path):
+            super().__init__(cache_path=cache_path)
+            self.calls = 0
+
+        def _one(self, model, prompt, temperature, max_tokens):
+            self.calls += 1
+            return _GOOD
+
+    with tempfile.TemporaryDirectory() as td:
+        cache_path = os.path.join(td, "cache.jsonl")
+        key = Cache.key("healthy", "model", 0.7, 4000, 0, "prompt")
+        Cache(cache_path).put(key, "")
+
+        backend = HealthyBackend(cache_path)
+        assert backend.complete("model", "prompt", n=1) == [_GOOD]
+        assert backend.calls == 1
 
 
 def test_frontier_tier_gets_token_headroom_for_reasoning():
@@ -456,6 +594,28 @@ def test_engine_frontier_ladder_is_verifier_gated():
         .solve("implement add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
     assert r.verified and r.stage == "frontier" and r.model == "pro"
     assert [call[0] for call in frontier.calls] == ["flash", "pro"]
+
+
+def test_engine_routes_a_frontier_rescue_to_its_own_backend():
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
+
+    local = _FakeBackend({"local": [_BAD]})
+    openrouter = _FakeBackend({"flash": [_BAD]})
+    codex = _FakeBackend({"gpt": [_GOOD]})
+    result = Engine(
+        local,
+        panel=["local"],
+        best="local",
+        k=1,
+        frontier=["flash", "gpt"],
+        frontier_backend=openrouter,
+        frontier_route={"gpt": codex},
+    ).solve("implement add", FunctionalCodeVerifier.from_cases("add", [((2, 3), 5)]))
+
+    assert result.verified and result.model == "gpt"
+    assert [call[0] for call in openrouter.calls] == ["flash"]
+    assert [call[0] for call in codex.calls] == ["gpt"]
 
 
 def test_timeout_is_bounded():
