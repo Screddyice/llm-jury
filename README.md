@@ -463,27 +463,28 @@ to a verified answer:
 Without a `--frontier` ladder there is nothing to escalate to, so the run still stops —
 and the error now points at `--frontier auto` as the way through.
 
-#### Standing down for a local router
+#### Standing down for Qwen 27B
 
-There is one refusal that does *not* escalate. [Backdoor](https://github.com/Screddyice/backdoor)'s
-hybrid router fronts Claude Code and, when its circuit breaker opens, serves sessions
-from a local Ollama profile — the same server and the same VRAM a council needs. It
-publishes that state to `~/.backdoor/failover-state.json`, and LLM-Jury reads it:
+There is one refusal that does *not* escalate. [Backdoor](https://github.com/Screddyice/backdoor)
+gives `qwen3.8:27b-obliterated` exclusive compute when a Claude or Codex session selects
+it directly or fails over to it. Backdoor publishes circuit-breaker state to
+`~/.backdoor/failover-state.json` and writes short ownership leases under
+`~/.backdoor/compute-leases/` before local inference begins. LLM-Jury also checks
+Ollama's `/api/ps` output as a residency backstop.
 
 ```
-[llmjury] backdoor's router has failed over to the local GPU (ConnectError); it opens
-          that breaker only when this host is offline, so neither the local council nor
-          the cloud ladder is available
-error: llm-jury is standing down.
+error: llm-jury is standing down; exclusive 27B compute is active.
+owner: claude-explicit owns qwen3.8:27b-obliterated
+The local council and every frontier provider, including OpenRouter, remain disabled
+until the 27B route releases the host.
 ```
 
-The breaker opens on exactly one condition — the host is offline — which is why this
-refusal is terminal rather than an escalation: there is no reachable tier left. The two
-tools therefore never contend for the same GPU. Reading is defensive: a missing,
-unparseable, or inactive file means "not failing over" (the state of any host with no
-router at all), and a flag whose writing process is gone is ignored, so a router killed
-mid-failover cannot disable the council forever. Point elsewhere with
-`LLMJURY_ROUTER_STATE`, or override with `LLMJURY_ALLOW_ROUTER_FAILOVER=1`.
+This gate runs before backend construction and ignores `--mem-check`, so it also blocks
+direct OpenRouter runs and verifier-gated frontier escalation. The lease closes the gap
+before Ollama reports the model as resident. An expired lease or one from a dead router
+process is ignored. Missing or unreadable state fails open. Point the probes elsewhere
+with `LLMJURY_ROUTER_STATE` and `LLMJURY_COMPUTE_LEASE_DIR` when testing an isolated
+router.
 
 One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
 into the *server* process, not into the client, so the preflight cannot read it and

@@ -138,6 +138,15 @@ def _func_cases(raw):
 
 def cmd_solve(a):
     _refuse_root()
+    from .memguard import exclusive_compute
+    exclusive, owner = exclusive_compute()
+    if exclusive:
+        sys.exit(
+            "error: llm-jury is standing down; exclusive 27B compute is active.\n"
+            f"owner: {owner}\n"
+            "The local council and every frontier provider, including OpenRouter, "
+            "remain disabled until the 27B route releases the host."
+        )
     task = _read(a.task)
     if a.cases:
         try:
@@ -237,13 +246,13 @@ def cmd_solve(a):
                     # no memory — perfectly usable. Drop the panel and escalate
                     # rather than killing a run that still has a safe path to a
                     # verified answer. Two refusals are not like that:
-                    #   report.offline   the router failed over, so there is no
-                    #                    internet and the ladder is unreachable too
+                    #   report.terminal  Backdoor assigned all model compute to Qwen,
+                    #                    so local and frontier calls must both stop
                     #   ollama frontier  would load the very models just refused.
                     #                    Not selectable today (--frontier-backend is
                     #                    openrouter/codex); kept so that adding
                     #                    it cannot silently re-open the hole.
-                    if frontier and not report.offline and a.frontier_backend != "ollama":
+                    if frontier and not report.terminal and a.frontier_backend != "ollama":
                         use_panel = False
                         frontier_providers = (
                             f"{a.frontier_backend}, then {rescue_backend}"
@@ -253,7 +262,7 @@ def cmd_solve(a):
                             "[llmjury] skipping the local council; escalating straight to "
                             + " -> ".join(frontier) + f" on {frontier_providers} "
                             "(remote, needs no memory on this host)\n")
-                    elif report.offline:
+                    elif report.terminal:
                         sys.exit(f"error: llm-jury is standing down.\nhint: {report.hint()}")
                     else:
                         sys.exit(

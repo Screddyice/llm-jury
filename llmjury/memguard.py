@@ -35,8 +35,10 @@ import json
 import os
 import platform
 import subprocess
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 GB = 1024 ** 3
 
@@ -77,14 +79,22 @@ SIMULATOR_OVERRIDE_ENV = "LLMJURY_ALLOW_SIMULATOR"
 # the same VRAM a council needs, so running one anyway is a fight over ~13 GB of
 # qwen tier plus ~23 GB of panel on a 36 GB host.
 #
-# It also means something stronger. The router opens that breaker on exactly one
-# condition: this host is offline. So when it is set, the frontier ladder is
-# unreachable too, and there is no tier left to escalate to -- which is why this
-# refusal is marked `offline` and the CLI exits instead of falling through to the
-# cloud the way a RAM or simulator refusal does.
+# This ownership is terminal even when a remote provider remains reachable. The
+# 27B route gets all model compute, so the council and every frontier stand down.
 ROUTER_STATE_PATH = os.environ.get(
     "LLMJURY_ROUTER_STATE") or os.path.expanduser("~/.backdoor/failover-state.json")
-ROUTER_OVERRIDE_ENV = "LLMJURY_ALLOW_ROUTER_FAILOVER"
+
+# Backdoor publishes one short-lived file per process and client route before it
+# asks Ollama to load the exclusive 27B model. The lease closes the race between
+# request admission and `/api/ps` showing the newly resident model. Residency is
+# checked as a second source of truth after the lease expires.
+COMPUTE_LEASE_DIR = os.environ.get(
+    "LLMJURY_COMPUTE_LEASE_DIR"
+) or os.path.expanduser("~/.backdoor/compute-leases")
+EXCLUSIVE_MODELS = {"qwen3.8:27b-obliterated"}
+DEFAULT_OLLAMA_HOST = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+if not DEFAULT_OLLAMA_HOST.startswith("http"):
+    DEFAULT_OLLAMA_HOST = f"http://{DEFAULT_OLLAMA_HOST}"
 
 
 def _env_float(name, default):
@@ -175,10 +185,6 @@ def _simulator_allowed():
     return os.environ.get(SIMULATOR_OVERRIDE_ENV, "").strip() not in ("", "0")
 
 
-def _router_allowed():
-    return os.environ.get(ROUTER_OVERRIDE_ENV, "").strip() not in ("", "0")
-
-
 def _pid_alive(pid):
     try:
         os.kill(pid, 0)
@@ -253,6 +259,57 @@ def loaded_bytes(host):
     return sum(by_model.values()), by_model
 
 
+def _exclusive_model(tag):
+    if not isinstance(tag, str):
+        return False
+    normalized = tag.removesuffix(":latest")
+    return normalized in EXCLUSIVE_MODELS
+
+
+def exclusive_compute(host=None):
+    """Return whether another route owns all model compute on this host.
+
+    This is an absolute process gate, not a RAM estimate. Callers must not start
+    a local council or a remote frontier while it is active. Lease and residency
+    probes fail open when their state cannot be read, matching the router guard.
+    """
+
+    now = time.time()
+    try:
+        lease_paths = Path(COMPUTE_LEASE_DIR).glob("*.json")
+        for path in lease_paths:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict) or not data.get("active"):
+                continue
+            if not _exclusive_model(data.get("model")):
+                continue
+            expires_at = data.get("expires_at")
+            if not isinstance(expires_at, (int, float)) or expires_at <= now:
+                continue
+            pid = data.get("pid")
+            if isinstance(pid, int) and not _pid_alive(pid):
+                continue
+            source = data.get("source")
+            source = source if isinstance(source, str) and source else "backdoor"
+            return True, f"{source} owns {data['model']}"
+    except OSError:
+        pass
+
+    _, resident = loaded_bytes(host or DEFAULT_OLLAMA_HOST)
+    for model in resident:
+        if _exclusive_model(model):
+            return True, f"{model} is resident in Ollama"
+
+    failing_over, reason = router_failover()
+    if failing_over:
+        because = f" ({reason})" if reason else ""
+        return True, f"backdoor failover is active{because}"
+    return False, ""
+
+
 def estimate_resident(disk_bytes, cells):
     """Predicted resident bytes for a model of `disk_bytes` at `cells` KV cells."""
     return int(disk_bytes * WEIGHT_FACTOR + cells * KV_BYTES_PER_CELL)
@@ -285,24 +342,22 @@ class Report:
         self.router_reason = router_reason
 
     @property
-    def offline(self):
-        """Is the cloud unreachable too, so escalating cannot help?
-
-        A RAM or simulator refusal is about THIS host's memory and leaves the
-        frontier ladder perfectly usable. A router-failover refusal does not:
-        the router only fails over when the host is offline, so there is no tier
-        left to escalate to. Callers use this to decide between falling through
-        to the frontier and stopping outright.
-        """
+    def terminal(self):
+        """Must the whole jury stop instead of escalating to a frontier?"""
         return self.router
+
+    @property
+    def offline(self):
+        """Backward-compatible alias for the former terminal-state name."""
+        return self.terminal
 
     def message(self):
         """Operator-facing explanation, with the arithmetic that drove the verdict."""
         if self.router:
             because = f" ({self.router_reason})" if self.router_reason else ""
-            return (f"backdoor's router has failed over to the local GPU{because}; "
-                    "it opens that breaker only when this host is offline, so "
-                    "neither the local council nor the cloud ladder is available")
+            return (f"backdoor has assigned the local GPU to failover{because}; "
+                    "the local council and every frontier provider are disabled "
+                    "while that exclusive ownership is active")
         if self.simulator:
             held = (f" (holding ~{self.simulator_rss / GB:.1f} GB)"
                     if self.simulator_rss else "")
@@ -322,10 +377,8 @@ class Report:
 
     def hint(self):
         if self.router:
-            return ("wait for the network — the router closes its breaker on its own "
-                    f"and republishes the change; inspect {ROUTER_STATE_PATH}; or set "
-                    f"{ROUTER_OVERRIDE_ENV}=1 to run anyway (the council will then "
-                    "contend with the router for the same VRAM)")
+            return ("wait for the router to release exclusive model compute; "
+                    f"inspect {ROUTER_STATE_PATH}")
         if self.simulator:
             return ("shut the simulator down first: `xcrun simctl shutdown all` "
                     "(it reboots in seconds when next needed); or use a cloud "
@@ -351,13 +404,12 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
     RAM unreadable -- yields ``ok=True`` with ``skipped`` set: this guard exists to
     stop a known-bad run, not to become a new way for runs to fail.
     """
-    # The router owns the GPU when it has failed over, and its failover means the
-    # host is offline. Checked first because it is the only refusal that also
-    # rules out escalating to the cloud -- there is nothing else to try.
-    if not _router_allowed():
-        failing_over, reason = router_failover()
-        if failing_over:
-            return Report(False, router=True, router_reason=reason)
+    # Router ownership is an absolute allocation policy, not a connectivity
+    # inference. It blocks local and frontier model calls even if cloud remains
+    # reachable, so there is no override here.
+    failing_over, reason = router_failover()
+    if failing_over:
+        return Report(False, router=True, router_reason=reason)
 
     # A booted iOS Simulator excludes a local panel outright, before any RAM
     # arithmetic: the CoreSimulator stack is hundreds of processes whose resident
