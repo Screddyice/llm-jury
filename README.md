@@ -621,3 +621,11 @@ messages.
 ## License
 
 MIT © The AI Collective
+
+### Memory preflight budget (2026-09-05)
+
+`DEFAULT_MEM_FRACTION` is 0.65, down from 0.70, to match the budget Ollama now enforces on the
+host. Metal reports a static 28.1 GiB to Ollama whatever the desktop is using; the launchd plist
+sets `OLLAMA_GPU_OVERHEAD` to 4 GiB, so Ollama budgets 23.6 GiB. The preflight refuses the same runs
+the server would evict, instead of approving a council Ollama then silently serialises. Override
+per run with `LLMJURY_MEM_FRACTION`.
