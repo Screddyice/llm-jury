@@ -54,9 +54,18 @@ KV_BYTES_PER_CELL = 85_000
 SERVER_DEFAULT_CTX = 32768
 
 # Share of physical RAM a council may occupy. The rest is not slack: it is the OS,
-# the editor, the browser, and the agent session that launched this run. At 0.70 a
-# 36 GB host allows ~25 GB of models.
-DEFAULT_MEM_FRACTION = 0.70
+# the editor, the browser, and the agent session that launched this run.
+#
+# 0.65 matches the budget Ollama itself enforces on this host since 2026-09-05.
+# Metal reports a static 28.1 GiB to Ollama regardless of what the desktop is
+# using, which is how a 16.5 GB load went in on top of 8.9 GiB free and an
+# exhausted swap. The launchd plist now sets OLLAMA_GPU_OVERHEAD=4GiB, so Ollama
+# budgets 28.1 - 4.0 - 0.5 (minimum) = 23.6 GiB. On 36 GiB that is 0.655; 0.65 is
+# 23.4 GiB, the measured top of the current panel's resident range, so the
+# preflight and the server refuse the same runs. A higher fraction here would
+# approve a council that Ollama then evicts a member of, which serialises the
+# panel rather than crashing the host, but quietly.
+DEFAULT_MEM_FRACTION = 0.65
 
 # Set to any non-empty value except "0" to permit a local panel while an iOS
 # Simulator is booted. The default is refusal: a booted simulator was measured at
