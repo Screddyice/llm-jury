@@ -631,6 +631,48 @@ sets `OLLAMA_GPU_OVERHEAD` to 4 GiB, so Ollama budgets 23.6 GiB. The preflight r
 the server would evict, instead of approving a council Ollama then silently serialises. Override
 per run with `LLMJURY_MEM_FRACTION`.
 
+### Desktop pressure and host prompt caches
+
+Ollama's `/api/ps` reports model/GPU allocations, not the full process footprint.
+The llama-server runner also defaults to an 8 GiB host prompt cache. On a 36 GiB
+Mac, the 27B runner reached a 26.4 GiB footprint while `/api/ps` reported 16.4 GiB;
+the logs showed 7.3 GiB of saved prompts. One cache update took 51 seconds.
+
+The preflight now reserves that cache bound per loaded/requested runner, refuses
+unreadable memory probes, and checks current desktop headroom as well as the
+static model budget. macOS warning/critical pressure blocks local work. On Linux
+the guard uses `MemAvailable`. It preserves 2 GiB beyond current desktop needs.
+An unknown or unlimited cache bound also refuses local admission.
+
+To reduce cache overhead, set `LLAMA_ARG_CACHE_RAM=1024` in the **Ollama server's**
+environment. It limits saved prompt states to 1 GiB without shrinking the model
+or its context window. An operator must restart Ollama at an idle point before
+the new environment applies. Preserve a rollback copy of the service config;
+do not restart Backdoor. Verify the runner log says `limits: 1024.000 MiB` before
+setting `LLMJURY_PROMPT_CACHE_MIB=1024` in clients. Until then, clients reserve the
+full default 8 GiB. A saved plist alone is not proof of the active limit.
+
+Other local clients can share the read-only admission check:
+
+```bash
+llmjury preflight --models qwen3.5:4b --num-ctx 24576
+```
+
+It returns JSON and exits 0 only on admission, without inference or cloud calls.
+The check includes Backdoor's live-process leases and 27B residency. Exclusive
+ownership blocks all jury providers; memory refusals can still use an explicitly
+configured remote frontier. `solve --backend ollama` and `reproduce --backend ollama` hold a nonblocking process
+lock at `~/.cache/llmjury/local-compute.lock`; cooperating background reviewers
+hold the same lock through their check and inference. `LLMJURY_LOCAL_LOCK` can
+override that path, but consumers must use the same value. Kernel locks disappear
+on process exit. This coordinates participating clients, not arbitrary direct
+Ollama calls, and does not preempt an inference if Qwen starts afterward.
+
+Verification: `python tests/test_llmjury.py` and
+`python tests/test_memory_pressure.py` run without model inference. Existing
+panel-fit measurements above exclude the extra prompt-cache reserve; use the
+current preflight before starting a council on a busy desktop.
+
 ## Working in this repo
 
 Python `>=3.9`, managed with **uv** (`uv.lock` committed). The package installs the

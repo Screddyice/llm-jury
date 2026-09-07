@@ -137,6 +137,17 @@ def _func_cases(raw):
 
 
 def cmd_solve(a):
+    if getattr(a, "backend", None) == "ollama":
+        from .memguard import local_compute_lock
+        try:
+            with local_compute_lock():
+                return _cmd_solve(a)
+        except (RuntimeError, OSError) as error:
+            sys.exit(f"error: local compute unavailable: {error}")
+    return _cmd_solve(a)
+
+
+def _cmd_solve(a):
     _refuse_root()
     from .memguard import exclusive_compute
     exclusive, owner = exclusive_compute()
@@ -322,6 +333,14 @@ def cmd_demo(a):
 
 def cmd_reproduce(a):
     from .benchmarks import reproduce
+    if a.backend == "ollama":
+        from .memguard import local_compute_lock
+        try:
+            with local_compute_lock():
+                return reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k,
+                                     pace=a.pace, num_ctx=a.num_ctx)
+        except (RuntimeError, OSError) as error:
+            sys.exit(f"error: local compute unavailable: {error}")
     reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace, num_ctx=a.num_ctx)
 
 
@@ -390,11 +409,27 @@ def cmd_install_codex(a):
     print(f"Codex skill {state}: {path}")
 
 
+def cmd_preflight(a):
+    """Read-only admission probe for other local-model consumers."""
+    from .memguard import check, DEFAULT_OLLAMA_HOST
+    report = check(a.models.split(","), host=a.host or DEFAULT_OLLAMA_HOST,
+                   num_ctx=a.num_ctx)
+    print(json.dumps({"ok": report.ok, "terminal": report.terminal,
+                      "reason": "admitted" if report.ok else report.message()}))
+    sys.exit(0 if report.ok else 1)
+
+
 def main():
     p = argparse.ArgumentParser(prog="llmjury",
                                 description="Local verified answers. Don't vote, verify.")
     p.add_argument("--version", action="version", version=f"llmjury {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    guard = sub.add_parser("preflight", help="check local model admission without inference")
+    guard.add_argument("--models", required=True, help="comma-separated model tags")
+    guard.add_argument("--num-ctx", type=int, default=8192)
+    guard.add_argument("--host", help="Ollama base URL")
+    guard.set_defaults(func=cmd_preflight)
 
     s = sub.add_parser("solve", help="solve a verifiable task with a verified small-model council")
     s.add_argument("--task", required=True, help="file containing the problem statement")

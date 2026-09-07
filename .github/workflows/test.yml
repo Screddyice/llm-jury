@@ -21,7 +21,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Run tests (zero dependencies)
-        run: python tests/test_llmjury.py
+        run: |
+          python tests/test_llmjury.py
+          python tests/test_memory_pressure.py
 
   build:
     runs-on: ubuntu-latest
