@@ -79,11 +79,26 @@ class HostProbeTests(unittest.TestCase):
             with self.subTest(payload=payload), patch.object(memguard, "_get_json", return_value=payload):
                 self.assertEqual(memguard.loaded_bytes("http://localhost"), (None, {}))
 
-    def test_darwin_probe_uses_query_only_and_reports_warning(self):
-        replies = [SimpleNamespace(stdout="2\n"), SimpleNamespace(stdout="System-wide memory free percentage: 25%\n")]
-        with patch.object(memguard.platform, "system", return_value="Darwin"), patch.object(memguard, "total_ram_bytes", return_value=36 * memguard.GB), patch.object(memguard.subprocess, "run", side_effect=replies) as probe:
-            self.assertEqual(memguard.host_memory(), (9 * memguard.GB, 2))
-            self.assertEqual(probe.call_args_list[1].args[0], ["/usr/bin/memory_pressure", "-Q"])
+    def test_darwin_probe_uses_page_counters_and_reports_warning(self):
+        for page_size, free, inactive, wired, compressor in [(4096, 65536, 196608, 1048576, 524288), (16384, 16384, 49152, 262144, 131072)]:
+            snapshot = (f'Mach Virtual Memory Statistics: (page size of {page_size} bytes)\n'
+                        f'Pages free: {free}.\nPages inactive: {inactive}.\n'
+                        f'Pages wired down: {wired}.\nPages occupied by compressor: {compressor}.\n')
+            replies = [SimpleNamespace(stdout="2\n"), SimpleNamespace(stdout=snapshot)]
+            with self.subTest(page_size=page_size), patch.object(memguard.platform, "system", return_value="Darwin"), patch.object(memguard, "total_ram_bytes", return_value=8 * memguard.GB), patch.object(memguard.subprocess, "run", side_effect=replies) as probe:
+                self.assertEqual(memguard.host_memory(), (memguard.GB, 2))
+                self.assertEqual(probe.call_args_list[1].args[0], ["/usr/bin/vm_stat"])
+
+    def test_darwin_does_not_count_wired_or_compressor_pages_as_available(self):
+        snapshot = ('Mach Virtual Memory Statistics: (page size of 4096 bytes)\n'
+                    'Pages free: 524288.\nPages inactive: 524288.\n'
+                    'Pages wired down: 1048576.\nPages occupied by compressor: 524288.\n')
+        with patch.object(memguard.platform, "system", return_value="Darwin"), patch.object(memguard, "total_ram_bytes", return_value=8 * memguard.GB), patch.object(memguard.subprocess, "run", side_effect=[SimpleNamespace(stdout="1"), SimpleNamespace(stdout=snapshot)]):
+            self.assertEqual(memguard.host_memory(), (2 * memguard.GB, 1))
+
+    def test_darwin_incomplete_page_snapshot_refuses_admission(self):
+        with patch.object(memguard.platform, "system", return_value="Darwin"), patch.object(memguard, "total_ram_bytes", return_value=8 * memguard.GB), patch.object(memguard.subprocess, "run", side_effect=[SimpleNamespace(stdout="1"), SimpleNamespace(stdout='Pages free: 100.')]):
+            self.assertEqual(memguard.host_memory(), (None, None))
 
     def test_bad_probe_never_becomes_zero_pressure(self):
         with patch.object(memguard.platform, "system", return_value="Darwin"), patch.object(memguard.subprocess, "run", side_effect=OSError("unavailable")):

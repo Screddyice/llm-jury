@@ -644,6 +644,14 @@ static model budget. macOS warning/critical pressure blocks local work. On Linux
 the guard uses `MemAvailable`. It preserves 2 GiB beyond current desktop needs.
 An unknown or unlimited cache bound also refuses local admission.
 
+On macOS, headroom comes from `vm_stat` free and inactive pages, using the
+reported page size and capped by physical RAM minus wired/compressor pages.
+The separate kernel warning/critical-pressure check still applies. Do not
+convert `memory_pressure -Q`'s percentage into available bytes: during rollout
+it reported 59% while wired and compressor allocations left less than 8 GiB
+of the 36 GiB machine outside those allocations. Tests cover 4 KiB and 16 KiB
+page sizes, missing counters, and the wired/compressor ceiling.
+
 To reduce cache overhead, set `LLAMA_ARG_CACHE_RAM=1024` in the **Ollama server's**
 environment. It limits saved prompt states to 1 GiB without shrinking the model
 or its context window. An operator must restart Ollama at an idle point before
