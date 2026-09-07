@@ -1152,13 +1152,10 @@ def test_memguard_counts_a_repeated_tag_once():
 
 
 def test_memguard_refuses_when_it_cannot_determine_memory_cost():
-    """The guard exists to stop a known-bad run, not to invent new failures."""
+    """Unknown host/model costs must not admit new local allocations."""
     from llmjury import memguard
-    saved = (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack,
-             memguard.router_failover)
+    restore = _fake_ollama(HOST_36GB, {"phi4": 9.1})
     try:
-        memguard.simulator_stack = lambda: (False, 0)
-        memguard.router_failover = lambda path=None: (False, "")
         memguard.total_ram_bytes = lambda: 0
         assert not memguard.check(["phi4"]).ok
         memguard.total_ram_bytes = lambda: HOST_36GB
@@ -1166,8 +1163,7 @@ def test_memguard_refuses_when_it_cannot_determine_memory_cost():
         report = memguard.check(["phi4"])
         assert not report.ok
     finally:
-        (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack,
-         memguard.router_failover) = saved
+        restore()
 
 
 def test_memguard_refuses_a_local_panel_while_a_simulator_is_booted():
