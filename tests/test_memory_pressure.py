@@ -98,6 +98,16 @@ class HostProbeTests(unittest.TestCase):
             with memguard.local_compute_lock():
                 pass
 
+    def test_local_benchmark_respects_the_same_compute_lock(self):
+        from llmjury import cli
+        from llmjury.benchmarks import reproduce
+        args = SimpleNamespace(which="humaneval", backend="ollama", n=1, k=1, pace=0, num_ctx=8192)
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LLMJURY_LOCAL_LOCK": directory + "/compute.lock"}), patch.object(reproduce, "run", side_effect=AssertionError("benchmark started despite existing owner")):
+            with memguard.local_compute_lock():
+                with self.assertRaises(SystemExit) as result:
+                    cli.cmd_reproduce(args)
+                self.assertIn("another local council or review", str(result.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -333,6 +333,14 @@ def cmd_demo(a):
 
 def cmd_reproduce(a):
     from .benchmarks import reproduce
+    if a.backend == "ollama":
+        from .memguard import local_compute_lock
+        try:
+            with local_compute_lock():
+                return reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k,
+                                     pace=a.pace, num_ctx=a.num_ctx)
+        except (RuntimeError, OSError) as error:
+            sys.exit(f"error: local compute unavailable: {error}")
     reproduce.run(a.which, backend=a.backend, n=a.n, k=a.k, pace=a.pace, num_ctx=a.num_ctx)
 
 

@@ -661,7 +661,7 @@ llmjury preflight --models qwen3.5:4b --num-ctx 24576
 It returns JSON and exits 0 only on admission, without inference or cloud calls.
 The check includes Backdoor's live-process leases and 27B residency. Exclusive
 ownership blocks all jury providers; memory refusals can still use an explicitly
-configured remote frontier. `solve --backend ollama` holds a nonblocking process
+configured remote frontier. `solve --backend ollama` and `reproduce --backend ollama` hold a nonblocking process
 lock at `~/.cache/llmjury/local-compute.lock`; cooperating background reviewers
 hold the same lock through their check and inference. `LLMJURY_LOCAL_LOCK` can
 override that path, but consumers must use the same value. Kernel locks disappear
