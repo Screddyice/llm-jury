@@ -678,6 +678,11 @@ current preflight before starting a council on a busy desktop.
 Python `>=3.9`, managed with **uv** (`uv.lock` committed). The package installs the
 `llmjury` and `jury` console scripts. No Node toolchain.
 
+The lock covers local development only. CI installs nothing and runs
+`python tests/test_llmjury.py` and `python tests/test_memory_pressure.py` straight
+against the stdlib on 3.9, 3.11 and 3.12, so a test that reaches for a dependency
+passes here and fails there.
+
 ```bash
 uv sync
 uv run pytest

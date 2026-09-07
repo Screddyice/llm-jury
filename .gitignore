@@ -17,3 +17,4 @@ CLAUDE.md
 
 # Claude Code - Local settings
 .claude/settings.local.json
+.gstack/
