@@ -32,8 +32,10 @@ over-estimating. Refusing a run that would have fit is a minor annoyance; allowi
 one that does not fit takes the machine down.
 """
 import json
+from contextlib import contextmanager
 import os
 import platform
+import re
 import subprocess
 import time
 import urllib.error
@@ -110,6 +112,69 @@ def _env_float(name, default):
 
 def mem_fraction():
     return _env_float("LLMJURY_MEM_FRACTION", DEFAULT_MEM_FRACTION)
+
+
+def prompt_cache_bytes():
+    """Per-runner host cache, separate from Ollama's reported GPU allocation.
+
+    Default to llama-server's 8 GiB limit. Only lower the client estimate after
+    verifying the running server's LLAMA_ARG_CACHE_RAM setting, not its saved
+    launch configuration. Negative/unparseable limits cannot bound admission.
+    """
+    try:
+        mib = int(os.environ.get("LLMJURY_PROMPT_CACHE_MIB", "8192"))
+        return mib * 1024 ** 2 if mib >= 0 else None
+    except ValueError:
+        return None
+
+
+def host_memory():
+    """Return (available bytes, pressure level); unreadable probes return None.
+
+    Darwin's level 1 is normal, 2 warning, 4 critical. Never run memory_pressure
+    without -Q: its other modes can deliberately create memory pressure.
+    """
+    try:
+        if platform.system() == "Darwin":
+            pressure = subprocess.run(
+                ["/usr/sbin/sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+                capture_output=True, text=True, timeout=5, check=True)
+            free = subprocess.run(["/usr/bin/memory_pressure", "-Q"],
+                                  capture_output=True, text=True, timeout=5, check=True)
+            match = re.search(r"System-wide memory free percentage:\s*(\d+)%", free.stdout)
+            total = total_ram_bytes()
+            if not match or not total or not 0 <= int(match[1]) <= 100:
+                return None, None
+            return total * int(match[1]) // 100, int(pressure.stdout.strip())
+        if platform.system() == "Linux":
+            with open("/proc/meminfo", encoding="utf-8") as source:
+                for line in source:
+                    if line.startswith("MemAvailable:"):
+                        return max(0, int(line.split()[1]) * 1024), 1
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return None, None
+
+
+@contextmanager
+def local_compute_lock():
+    """Serialize cooperating councils and background reviews on this host."""
+    try:
+        import fcntl
+    except ImportError as error:
+        raise RuntimeError("local compute locking is unavailable on this platform") from error
+    path = Path(os.environ.get("LLMJURY_LOCAL_LOCK") or
+                Path.home() / ".cache/llmjury/local-compute.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("another local council or review owns compute; retry after it finishes") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def total_ram_bytes():
@@ -247,15 +312,18 @@ def disk_sizes(host):
 
 
 def loaded_bytes(host):
-    """(bytes resident now, {tag: bytes}) from /api/ps. Empty when unreachable."""
+    """(bytes resident now, {tag: bytes}); None total means an unreadable probe."""
     data = _get_json(host.rstrip("/") + "/api/ps")
-    if not isinstance(data, dict):
-        return 0, {}
+    if not isinstance(data, dict) or not isinstance(data.get("models"), list):
+        return None, {}
     by_model = {}
-    for entry in data.get("models") or []:
+    for entry in data["models"]:
+        if not isinstance(entry, dict):
+            return None, {}
         name, size = entry.get("name"), entry.get("size")
-        if isinstance(name, str) and isinstance(size, int):
-            by_model[name] = size
+        if not isinstance(name, str) or not name or type(size) is not int or size < 0:
+            return None, {}
+        by_model[name] = size
     return sum(by_model.values()), by_model
 
 
@@ -328,7 +396,7 @@ class Report:
 
     def __init__(self, ok, budget=0, projected=0, resident=0, per_model=None,
                  unknown=None, skipped=None, simulator=False, simulator_rss=0,
-                 router=False, router_reason=""):
+                 router=False, router_reason="", pressure_reason=""):
         self.ok = ok
         self.budget = budget
         self.projected = projected
@@ -340,6 +408,7 @@ class Report:
         self.simulator_rss = simulator_rss
         self.router = router
         self.router_reason = router_reason
+        self.pressure_reason = pressure_reason
 
     @property
     def terminal(self):
@@ -353,9 +422,11 @@ class Report:
 
     def message(self):
         """Operator-facing explanation, with the arithmetic that drove the verdict."""
+        if self.pressure_reason:
+            return self.pressure_reason
         if self.router:
             because = f" ({self.router_reason})" if self.router_reason else ""
-            return (f"backdoor has assigned the local GPU to failover{because}; "
+            return (f"exclusive ownership of local model compute is active{because}; "
                     "the local council and every frontier provider are disabled "
                     "while that exclusive ownership is active")
         if self.simulator:
@@ -376,6 +447,8 @@ class Report:
         return "\n".join(lines)
 
     def hint(self):
+        if self.pressure_reason:
+            return "wait for memory pressure to clear or use a remote backend"
         if self.router:
             return ("wait for the router to release exclusive model compute; "
                     f"inspect {ROUTER_STATE_PATH}")
@@ -400,15 +473,17 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
           fraction=None):
     """Would loading `models` concurrently over-commit this host?
 
-    Returns a :class:`Report`. Anything we cannot determine -- Ollama unreachable,
-    RAM unreadable -- yields ``ok=True`` with ``skipped`` set: this guard exists to
-    stop a known-bad run, not to become a new way for runs to fail.
+    Returns a :class:`Report`. Unknown memory/model costs refuse local admission;
+    remote escalation remains possible unless exclusive ownership is active.
     """
     # Router ownership is an absolute allocation policy, not a connectivity
     # inference. It blocks local and frontier model calls even if cloud remains
     # reachable, so there is no override here.
     failing_over, reason = router_failover()
     if failing_over:
+        return Report(False, router=True, router_reason=reason)
+    exclusive, reason = exclusive_compute(host)
+    if exclusive:
         return Report(False, router=True, router_reason=reason)
 
     # A booted iOS Simulator excludes a local panel outright, before any RAM
@@ -423,11 +498,22 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
 
     total = total_ram_bytes()
     if not total:
-        return Report(True, skipped="cannot read physical RAM")
+        return Report(False, skipped="cannot read physical RAM",
+                      pressure_reason="cannot read physical RAM; local admission refused")
+
+    available, pressure = host_memory()
+    if available is None or pressure is None:
+        return Report(False, pressure_reason="cannot read host memory pressure; local admission refused")
+    if pressure != 1:
+        return Report(False, pressure_reason=f"host memory pressure is elevated (level {pressure}); local admission refused")
+    cache = prompt_cache_bytes()
+    if cache is None:
+        return Report(False, pressure_reason="prompt cache limit is unknown or unlimited; local admission refused")
 
     sizes = disk_sizes(host)
     if sizes is None:
-        return Report(True, skipped="ollama unreachable")
+        return Report(False, skipped="ollama unreachable",
+                      pressure_reason="cannot read Ollama model sizes; local admission refused")
 
     slots = num_parallel() if parallel is None else parallel
     ctx = int(num_ctx) if int(num_ctx or 0) > 0 else SERVER_DEFAULT_CTX
@@ -435,14 +521,17 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
     budget = int(total * (mem_fraction() if fraction is None else fraction))
 
     resident_total, resident_by_model = loaded_bytes(host)
+    if resident_total is None:
+        return Report(False, pressure_reason="cannot read Ollama residency; local admission refused")
 
     # Callers assemble the probe list as [best] + panel, and `best` is normally a
     # member of the panel, so the same tag arrives twice. Ollama loads it once;
     # counting it twice would over-refuse a panel that actually fits.
     seen, unique = set(), []
     for tag in models:
-        if tag not in seen:
-            seen.add(tag)
+        canonical = _canonical(tag, sizes) or tag
+        if canonical not in seen:
+            seen.add(canonical)
             unique.append(tag)
 
     per_model, unknown, need = [], [], 0
@@ -454,9 +543,26 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
         cost = estimate_resident(sizes[canonical], cells)
         per_model.append((tag, cost))
         # Already resident models are counted once, via resident_total.
-        if canonical not in resident_by_model and tag not in resident_by_model:
-            need += cost
+        resident = resident_by_model.get(canonical, resident_by_model.get(tag, 0))
+        # A resident model may need a larger context for this request.
+        need += max(0, cost - resident)
 
+    # /api/ps omits the runner's host prompt cache. Reserve its entire bound,
+    # including for resident runners: a snapshot cannot prove how much is filled.
+    runner_names = {name.removesuffix(":latest") for name in resident_by_model}
+    runner_names.update(name.removesuffix(":latest") for name in seen)
+    need += cache * len(runner_names)
     projected = resident_total + need
+    # Keep 2 GiB beyond the current desktop's needs. The static fraction still
+    # caps model residency; this second ceiling adapts as other apps grow.
+    headroom = max(0, available - 2 * GB)
+    if unknown:
+        return Report(False, unknown=unknown,
+                      pressure_reason="model costs unknown: " + ", ".join(unknown))
+    if need > headroom and projected <= budget:
+        return Report(False, budget=budget, projected=projected, resident=resident_total,
+                      per_model=per_model,
+                      pressure_reason=f"local work needs up to {need / GB:.1f} GiB additional memory; "
+                                      f"only {headroom / GB:.1f} GiB available after the desktop reserve")
     return Report(projected <= budget, budget=budget, projected=projected,
                   resident=resident_total, per_model=per_model, unknown=unknown)

@@ -994,17 +994,22 @@ def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0),
     """
     from llmjury import memguard
     saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
-             memguard.simulator_stack, memguard.router_failover)
+             memguard.simulator_stack, memguard.router_failover, memguard.host_memory,
+             memguard.prompt_cache_bytes, memguard.exclusive_compute)
     loaded = loaded or {}
     memguard.disk_sizes = lambda host: {t: int(g * 1e9) for t, g in sizes_gb.items()}
     memguard.loaded_bytes = lambda host: (sum(loaded.values()), dict(loaded))
     memguard.total_ram_bytes = lambda: monkeypatched
     memguard.simulator_stack = lambda: simulator
     memguard.router_failover = lambda path=None: router
+    memguard.host_memory = lambda: (monkeypatched, 1)
+    memguard.prompt_cache_bytes = lambda: 0
+    memguard.exclusive_compute = lambda host=None: (False, "")
 
     def restore():
         (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
-         memguard.simulator_stack, memguard.router_failover) = saved
+         memguard.simulator_stack, memguard.router_failover, memguard.host_memory,
+         memguard.prompt_cache_bytes, memguard.exclusive_compute) = saved
     return restore
 
 
@@ -1146,7 +1151,7 @@ def test_memguard_counts_a_repeated_tag_once():
         restore()
 
 
-def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
+def test_memguard_refuses_when_it_cannot_determine_memory_cost():
     """The guard exists to stop a known-bad run, not to invent new failures."""
     from llmjury import memguard
     saved = (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack,
@@ -1155,11 +1160,11 @@ def test_memguard_skips_rather_than_blocks_when_it_cannot_tell():
         memguard.simulator_stack = lambda: (False, 0)
         memguard.router_failover = lambda path=None: (False, "")
         memguard.total_ram_bytes = lambda: 0
-        assert memguard.check(["phi4"]).ok
+        assert not memguard.check(["phi4"]).ok
         memguard.total_ram_bytes = lambda: HOST_36GB
         memguard.disk_sizes = lambda host: None          # ollama unreachable
         report = memguard.check(["phi4"])
-        assert report.ok and report.skipped
+        assert not report.ok
     finally:
         (memguard.disk_sizes, memguard.total_ram_bytes, memguard.simulator_stack,
          memguard.router_failover) = saved
