@@ -141,3 +141,31 @@ def test_subscription_records_are_separable_from_metered_ones(tmp_path, monkeypa
 def test_record_subscription_never_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(tmp_path / "nodir" / "x.jsonl"))
     spend.record_subscription("codex", "m", prompt="a", completion="b")
+
+
+def test_claude_cli_escalation_is_recorded_as_avoided_spend(tmp_path, monkeypatch):
+    """The Claude rescue is the same economics as the Codex one, and was equally silent.
+
+    Inside Claude Code, `_claude_frontier_rescue` diverts the ladder's paid
+    Anthropic rung to the authenticated CLI — the rung that costs roughly 35x the
+    open-weight tiers on OpenRouter. Nothing was metered, so nothing was recorded,
+    so the largest avoided cost in the whole ladder was the least visible.
+    """
+    import types
+    from llmjury import backends
+
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+
+    def fake_runner(cmd, **kwargs):
+        return types.SimpleNamespace(returncode=0, stdout="def add(a, b):\n    return a + b\n", stderr="")
+
+    backend = backends.ClaudeBackend(runner=fake_runner)
+    out = backend._one("claude-opus-5", "write add()", 0.2, 256)
+    assert "return a + b" in out
+
+    rec = json.loads(ledger.read_text().splitlines()[0])
+    assert rec["backend"] == "claude"
+    assert rec["billing"] == "subscription"
+    assert rec["cost_usd"] == 0.0
+    assert rec["avoided_usd"] > 0
