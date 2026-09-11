@@ -237,7 +237,12 @@ class CodexBackend(Backend):
                     f"[llmjury] codex {model or '(configured default)'} exited "
                     f"{completed.returncode}{suffix}\n")
                 return ""
-            return (completed.stdout or "").strip()
+            answer = (completed.stdout or "").strip()
+            # A subscription served this, so nothing was metered -- which is
+            # exactly why it was invisible. Record what it avoided paying.
+            spend.record_subscription(self.name, model or "(configured default)",
+                                      prompt=prompt, completion=answer)
+            return answer
 
 
 class ClaudeBackend(Backend):
@@ -301,7 +306,12 @@ class ClaudeBackend(Backend):
                     f"[llmjury] claude {model or '(configured default)'} exited "
                     f"{completed.returncode}{suffix}\n")
                 return ""
-            return (completed.stdout or "").strip()
+            answer = (completed.stdout or "").strip()
+            # Same as the Codex path: the Claude Code subscription covers this,
+            # so nothing is metered and nothing would otherwise be recorded.
+            spend.record_subscription(self.name, model or "(configured default)",
+                                      prompt=prompt, completion=answer)
+            return answer
 
 
 class DemoBackend(Backend):

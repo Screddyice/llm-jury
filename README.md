@@ -523,6 +523,28 @@ Every metered OpenRouter call appends one line to `~/.llmjury/spend.jsonl`
 `usage: {include: true}` — not a local price table that goes stale the next time a
 model is repriced.
 
+**Subscription-served escalations are recorded too, as spend that did not happen.**
+`--frontier-backend codex` (and the Claude CLI backend) authenticate from their own CLI
+session, so the call is covered by a subscription already paid for and no metered request
+is made. Nothing reached this ledger, and a report reading it saw OpenRouter usage of
+zero — true, but indistinguishable from "the frontier ladder never ran" when what
+actually happened is "it ran for free". Those rows carry `billing: "subscription"`,
+`cost_usd: 0.0`, and an `avoided_usd` estimate of the OpenRouter charge that did not
+occur:
+
+```json
+{"ts": "...", "backend": "codex", "model": "gpt-5.6-sol", "billing": "subscription",
+ "prompt_tokens": 1000, "completion_tokens": 200, "cost_usd": 0.0,
+ "avoided_usd": 0.00072, "estimated": true}
+```
+
+`estimated: true` is not decoration. The CLI returns text, not token counts, so tokens
+are inferred from characters at four per token, and the rate is deepseek-v4-pro's —
+the ladder's middle rung. The cheaper first rung and the far dearer Anthropic rung
+bracket it, so the figure deliberately under-claims rather than flatters. Override with
+`LLMJURY_AVOIDED_INPUT_PER_MTOK` / `LLMJURY_AVOIDED_OUTPUT_PER_MTOK`. Filter on
+`billing` to keep measured spend and avoided spend apart; never add them together.
+
 This exists because llm-jury's frontier ladder spends real money in its own process,
 so none of it shows up in a Claude or Codex transcript and a usage report reading
 those transcripts cannot see it. The consumer (backdoor's weekly model-economics
