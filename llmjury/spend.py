@@ -26,6 +26,20 @@ from datetime import datetime, timezone
 
 DEFAULT_LEDGER = os.path.expanduser("~/.llmjury/spend.jsonl")
 
+# What an escalation WOULD have cost on OpenRouter, per million tokens, when the
+# Codex CLI served it instead. Override with LLMJURY_AVOIDED_{INPUT,OUTPUT}_PER_MTOK.
+#
+# Defaults are deepseek-v4-pro's rates: the ladder's middle rung, and the tier a
+# Codex escalation most often stands in for. The first rung is cheaper and the
+# Anthropic rung is far dearer, so this is a deliberately conservative middle --
+# an avoided-cost figure should under-claim rather than flatter itself.
+AVOIDED_INPUT_PER_MTOK = float(os.environ.get("LLMJURY_AVOIDED_INPUT_PER_MTOK", 0.40))
+AVOIDED_OUTPUT_PER_MTOK = float(os.environ.get("LLMJURY_AVOIDED_OUTPUT_PER_MTOK", 1.60))
+# The Codex CLI returns text, not token counts, so tokens are estimated from
+# characters. Four is the usual English rule of thumb and is close enough for a
+# figure already labelled an estimate.
+CHARS_PER_TOKEN = 4.0
+
 
 def ledger_path():
     return os.environ.get("LLMJURY_SPEND_LEDGER", DEFAULT_LEDGER)
@@ -58,4 +72,44 @@ def record(backend, model, usage):
             fh.write(json.dumps(row) + "\n")
     except Exception:
         # Deliberately silent: see the module docstring.
+        pass
+
+
+def record_subscription(backend, model, prompt="", completion=""):
+    """Record an escalation a subscription served, and what it avoided paying.
+
+    `--frontier-backend codex` authenticates from the Codex CLI's own session,
+    so the call is covered by a subscription already paid for and no metered
+    request is made. Nothing therefore reached this ledger, and a report reading
+    it saw OpenRouter usage of zero -- true, but indistinguishable from "the
+    frontier ladder never ran" when what actually happened is "it ran for free".
+
+    `cost_usd` is 0.0 because nothing was billed. `avoided_usd` is an ESTIMATE of
+    the OpenRouter charge that did not occur, flagged with `estimated: true` so a
+    consumer can present it as the projection it is rather than as measured
+    spend. Never raises, for the reason in the module docstring.
+    """
+    try:
+        path = ledger_path()
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        in_tok = len(prompt or "") / CHARS_PER_TOKEN
+        out_tok = len(completion or "") / CHARS_PER_TOKEN
+        avoided = (in_tok * AVOIDED_INPUT_PER_MTOK
+                   + out_tok * AVOIDED_OUTPUT_PER_MTOK) / 1e6
+        row = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "backend": backend,
+            "model": model,
+            "billing": "subscription",
+            "prompt_tokens": int(in_tok),
+            "completion_tokens": int(out_tok),
+            "cost_usd": 0.0,
+            "avoided_usd": round(avoided, 6),
+            "estimated": True,
+        }
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception:
         pass

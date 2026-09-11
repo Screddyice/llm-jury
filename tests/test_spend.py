@@ -97,3 +97,47 @@ def test_openrouter_backend_records_the_call_it_was_billed_for(tmp_path, monkeyp
     assert rec["model"] == "deepseek/deepseek-v4-flash"
     assert rec["cost_usd"] == 0.0031
     assert rec["prompt_tokens"] == 42
+
+
+# --- subscription-served escalations: the spend that did NOT happen ---------
+
+
+def test_record_subscription_logs_the_openrouter_spend_avoided(tmp_path, monkeypatch):
+    """Escalating to the Codex CLI costs nothing beyond a subscription already paid for.
+
+    That is the whole point of `--frontier-backend codex`, and it was invisible:
+    no OpenRouter call is made, so nothing reached the ledger and the weekly
+    report showed OpenRouter usage as zero — true, but it read as "the frontier
+    ladder was never used" rather than "it ran for free".
+    """
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+
+    spend.record_subscription("codex", "gpt-5.6-sol", prompt="x" * 4000, completion="y" * 800)
+
+    rec = json.loads(ledger.read_text().splitlines()[0])
+    assert rec["backend"] == "codex"
+    assert rec["billing"] == "subscription"
+    assert rec["cost_usd"] == 0.0            # nothing was metered
+    assert rec["avoided_usd"] > 0            # but something was avoided
+    assert rec["estimated"] is True          # and it is an estimate, flagged
+
+
+def test_subscription_records_are_separable_from_metered_ones(tmp_path, monkeypatch):
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+
+    spend.record("openrouter", "deepseek/deepseek-v4-flash",
+                 {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.25})
+    spend.record_subscription("codex", "gpt-5.6-sol", prompt="x" * 400, completion="y" * 80)
+
+    rows = [json.loads(l) for l in ledger.read_text().splitlines()]
+    metered = [r for r in rows if r.get("billing") != "subscription"]
+    free = [r for r in rows if r.get("billing") == "subscription"]
+    assert len(metered) == 1 and metered[0]["cost_usd"] == 0.25
+    assert len(free) == 1 and free[0]["cost_usd"] == 0.0
+
+
+def test_record_subscription_never_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(tmp_path / "nodir" / "x.jsonl"))
+    spend.record_subscription("codex", "m", prompt="a", completion="b")
