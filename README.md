@@ -508,6 +508,34 @@ council, because LLM-Jury verifies rather than votes: weaker panelists escalate 
 frontier ladder more often instead of returning worse answers. On a larger host, pass a
 stronger panel through `--models`.
 
+### Spend ledger
+
+Every metered OpenRouter call appends one line to `~/.llmjury/spend.jsonl`
+(override with `LLMJURY_SPEND_LEDGER`):
+
+```json
+{"ts": "2026-09-11T12:40:00+00:00", "backend": "openrouter",
+ "model": "deepseek/deepseek-v4-flash", "prompt_tokens": 100,
+ "completion_tokens": 20, "cost_usd": 0.0025}
+```
+
+`cost_usd` is the charge OpenRouter reports for that call — requests are sent with
+`usage: {include: true}` — not a local price table that goes stale the next time a
+model is repriced.
+
+This exists because llm-jury's frontier ladder spends real money in its own process,
+so none of it shows up in a Claude or Codex transcript and a usage report reading
+those transcripts cannot see it. The consumer (backdoor's weekly model-economics
+report) reads this file rather than `OPENROUTER_API_KEY`: one system should not hold
+another's credential, and an account-wide total could not be attributed to a client
+anyway.
+
+Recording is best-effort and never raises. A billing side-effect that can fail the
+solve it was measuring is worse than no ledger, so a ledger that cannot be written is
+silently skipped. A call that never returned a response is never recorded — it was
+never billed, and counting it would overstate spend. The file is append-only and
+nothing rotates it; delete it when it gets large.
+
 ### Caching
 
 Generations are cached in `~/.llmjury/cache.jsonl`, keyed on backend, model,
