@@ -137,6 +137,14 @@ def _func_cases(raw):
 
 
 def cmd_solve(a):
+    from .memguard import exclusive_compute
+    exclusive, owner = exclusive_compute()
+    frontier = getattr(a, "frontier", None)
+    frontier_backend = getattr(a, "frontier_backend", "openrouter")
+    if exclusive and frontier and frontier_backend != "ollama":
+        # Qwen 27B owns local compute. Do not even try to acquire the local
+        # council lock; the frontier path is remote and remains verifier-gated.
+        return _cmd_solve(a, force_frontier=True, exclusive_owner=owner)
     if getattr(a, "backend", None) == "ollama":
         from .memguard import local_compute_lock
         try:
@@ -147,11 +155,11 @@ def cmd_solve(a):
     return _cmd_solve(a)
 
 
-def _cmd_solve(a):
+def _cmd_solve(a, force_frontier=False, exclusive_owner=None):
     _refuse_root()
     from .memguard import exclusive_compute
     exclusive, owner = exclusive_compute()
-    if exclusive:
+    if exclusive and not force_frontier:
         sys.exit(
             "error: llm-jury is standing down; exclusive 27B compute is active.\n"
             f"owner: {owner}\n"
@@ -219,8 +227,9 @@ def _cmd_solve(a):
         frontier_route[rescue_model] = _backend(rescue_backend)
     from .panels import FRONTIER_ALIASES
     if a.frontier in FRONTIER_ALIASES:
+        route_start = "exclusive local compute -> " if force_frontier else "local council -> "
         sys.stderr.write(
-            f"[llmjury] {a.frontier} route: local council -> "
+            f"[llmjury] {a.frontier} route: " + route_start
             + " -> ".join(frontier) + " (verifier-gated)\n")
     if rescue_model:
         host = "Claude Code" if rescue_backend == "claude" else "Codex"
@@ -228,11 +237,23 @@ def _cmd_solve(a):
         sys.stderr.write(
             f"[llmjury] {host} session detected; authenticated {provider} is the final "
             "rescue if OpenRouter produces no verified candidate\n")
+    if force_frontier:
+        if not frontier:
+            # This should be unreachable through cmd_solve, but keep the
+            # lower-level helper safe for callers and future integrations.
+            sys.exit(
+                "error: exclusive 27B compute is active; add --frontier auto "
+                "to route this task to a remote verifier-gated model")
+        owner_label = exclusive_owner or owner or "Qwen 27B"
+        sys.stderr.write(
+            f"[llmjury] {owner_label} owns local compute; skipping the local council "
+            "and routing directly to " + " -> ".join(frontier) + " "
+            f"on {a.frontier_backend} (remote, verifier-gated)\n")
     fb = None
     if frontier:
         fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
     use_panel = True
-    if backend.name == "ollama":
+    if backend.name == "ollama" and not force_frontier:
         # Preflight: flag panel tags with a baked SYSTEM prompt before spending
         # minutes prefilling one (see baked_system_warnings for the field data).
         from .backends import baked_system_warnings, show_system_chars
