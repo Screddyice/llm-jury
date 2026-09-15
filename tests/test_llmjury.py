@@ -1411,6 +1411,29 @@ def test_cli_blocks_openrouter_before_backend_creation_during_exclusive_compute(
         backend.assert_not_called()
 
 
+def test_cli_routes_frontier_directly_when_qwen_owns_compute():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from llmjury.cli import cmd_solve
+
+    args = SimpleNamespace(
+        backend="ollama", frontier="auto", frontier_backend="openrouter",
+    )
+    with patch(
+        "llmjury.memguard.exclusive_compute",
+        return_value=(True, "qwen owns qwen3.8:27b-obliterated"),
+    ), patch("llmjury.cli._cmd_solve") as solve, patch(
+        "llmjury.memguard.local_compute_lock",
+    ) as local_lock:
+        cmd_solve(args)
+        solve.assert_called_once_with(
+            args,
+            force_frontier=True,
+            exclusive_owner="qwen owns qwen3.8:27b-obliterated",
+        )
+        local_lock.assert_not_called()
+
+
 # ── Frontier fallback when the panel cannot load ─────────────────────────────
 
 
