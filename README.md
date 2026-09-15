@@ -465,8 +465,8 @@ and the error now points at `--frontier auto` as the way through.
 
 #### Qwen 27B takes local compute priority
 
-The Qwen launcher gives `qwen3.8:27b-obliterated` exclusive compute when a Claude or Codex
-session selects it directly. The launcher preempts a cooperating local council or diff
+The Qwen launcher gives `qwen3.8:27b-obliterated` exclusive compute when a local Qwen,
+Claude, or Codex session selects it directly. The launcher preempts a cooperating local council or diff
 reviewer that holds the shared compute lock, then runs its normal pressure and RAM guards.
 It refuses to force-stop another Qwen or Ollama process. [Backdoor](https://github.com/Screddyice/backdoor)
 publishes circuit-breaker state to
