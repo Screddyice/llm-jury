@@ -463,28 +463,30 @@ to a verified answer:
 Without a `--frontier` ladder there is nothing to escalate to, so the run still stops —
 and the error now points at `--frontier auto` as the way through.
 
-#### Standing down for Qwen 27B
+#### Qwen 27B takes local compute priority
 
-There is one refusal that does *not* escalate. [Backdoor](https://github.com/Screddyice/backdoor)
-gives `qwen3.8:27b-obliterated` exclusive compute when a Claude or Codex session selects
-it directly or fails over to it. Backdoor publishes circuit-breaker state to
+The Qwen launcher gives `qwen3.8:27b-obliterated` exclusive compute when a Claude or Codex
+session selects it directly. The launcher preempts a cooperating local council or diff
+reviewer that holds the shared compute lock, then runs its normal pressure and RAM guards.
+It refuses to force-stop another Qwen or Ollama process. [Backdoor](https://github.com/Screddyice/backdoor)
+publishes circuit-breaker state to
 `~/.backdoor/failover-state.json` and writes short ownership leases under
 `~/.backdoor/compute-leases/` before local inference begins. LLM-Jury also checks
 Ollama's `/api/ps` output as a residency backstop.
 
 ```
 error: llm-jury is standing down; exclusive 27B compute is active.
-owner: claude-explicit owns qwen3.8:27b-obliterated
-The local council and every frontier provider, including OpenRouter, remain disabled
-until the 27B route releases the host.
+owner: qwen owns qwen3.8:27b-obliterated
+hint: add --frontier auto to skip the local council and use the remote verifier ladder.
 ```
 
-This gate runs before backend construction and ignores `--mem-check`, so it also blocks
-direct OpenRouter runs and verifier-gated frontier escalation. The lease closes the gap
-before Ollama reports the model as resident. An expired lease or one from a dead router
-process is ignored. Missing or unreadable state fails open. Point the probes elsewhere
-with `LLMJURY_ROUTER_STATE` and `LLMJURY_COMPUTE_LEASE_DIR` when testing an isolated
-router.
+Without `--frontier`, this gate runs before backend construction and keeps the run local
+and fail-closed. With `--frontier auto`, LLM-Jury skips local backend use and routes straight
+to the remote, verifier-gated ladder. That path does not load Ollama models or compete for
+the local lock. The lease closes the gap before Ollama reports the model as resident. An
+expired lease or one from a dead router process is ignored. Missing or unreadable state
+fails open. Point the probes elsewhere with `LLMJURY_ROUTER_STATE` and
+`LLMJURY_COMPUTE_LEASE_DIR` when testing an isolated router.
 
 One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
 into the *server* process, not into the client, so the preflight cannot read it and
