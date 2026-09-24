@@ -131,21 +131,27 @@ def prompt_cache_bytes():
 def host_memory():
     """Return (available bytes, pressure level); unreadable probes return None.
 
-    Darwin's level 1 is normal, 2 warning, 4 critical. Never run memory_pressure
-    without -Q: its other modes can deliberately create memory pressure.
+    Darwin's level 1 is normal, 2 warning, 4 critical. Use free + inactive page
+    counts for headroom, bounded by RAM outside wired/compressor allocations.
+    The memory_pressure command's percentage is not a physical-free-RAM ratio.
     """
     try:
         if platform.system() == "Darwin":
             pressure = subprocess.run(
                 ["/usr/sbin/sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
                 capture_output=True, text=True, timeout=5, check=True)
-            free = subprocess.run(["/usr/bin/memory_pressure", "-Q"],
+            snapshot = subprocess.run(["/usr/bin/vm_stat"],
                                   capture_output=True, text=True, timeout=5, check=True)
-            match = re.search(r"System-wide memory free percentage:\s*(\d+)%", free.stdout)
+            match = re.search(r"page size of (\d+) bytes", snapshot.stdout)
+            counts = dict(re.findall(r"^([^:\n]+):\s*(\d+)\.\s*$", snapshot.stdout, re.MULTILINE))
+            required = ("Pages free", "Pages inactive", "Pages wired down", "Pages occupied by compressor")
             total = total_ram_bytes()
-            if not match or not total or not 0 <= int(match[1]) <= 100:
+            if not match or not total or int(match[1]) <= 0 or any(key not in counts for key in required):
                 return None, None
-            return total * int(match[1]) // 100, int(pressure.stdout.strip())
+            page_size = int(match[1])
+            available = (int(counts["Pages free"]) + int(counts["Pages inactive"])) * page_size
+            reserved = (int(counts["Pages wired down"]) + int(counts["Pages occupied by compressor"])) * page_size
+            return min(available, max(0, total - reserved)), int(pressure.stdout.strip())
         if platform.system() == "Linux":
             with open("/proc/meminfo", encoding="utf-8") as source:
                 for line in source:
