@@ -189,11 +189,13 @@ terminal tool, and accepts a candidate only when the JSON result contains
 
 ```bash
 llmjury solve --task task.txt --tests tests.py --entry-point solve \
-    --backend ollama --frontier auto --json
+    --backend ollama --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" \
+    --frontier-backend codex --json
 ```
 
-The skill keeps private runs local when the user requests them or OpenRouter has no
-credential. Codex runs the repository's tests after it applies a verified candidate.
+The skill omits the frontier when the user requests a private local run. It uses the
+authenticated Codex CLI after local candidates fail verification, without OpenRouter
+API charges. Codex runs the repository's tests after it applies a verified candidate.
 It does not send prose, architecture, UI judgment, or code without a trustworthy
 oracle to the jury.
 
@@ -235,45 +237,28 @@ Use `--scope project` to install the Claude skill in only the current repository
 
 ## Codex Fusion
 
-The recommended Codex workflow keeps candidate generation local until the verifier proves
-the local council needs help:
+The Codex app's default jury workflow uses local models while they can satisfy the
+verifier, then uses the authenticated Codex CLI:
 
 ```text
 The host agent frames the task and oracle
-  → Phi-4 on local Ollama
-  → Gemma 3 12B + Llama 3.1 8B only if Phi-4 fails
-  → DeepSeek V4 Flash on OpenRouter only if the local council fails
-  → DeepSeek V4 Pro only if Flash also fails
-  → the host's authenticated Codex or Claude CLI if OpenRouter fails
+  → Gemma 3 12B on local Ollama
+  → Llama 3.1 8B + Phi-4 Mini only if Gemma fails
+  → the host's authenticated Codex CLI if local candidates fail
   → return the first candidate that passes the oracle
 ```
 
 Run that policy with:
 
 ```bash
-export OPENROUTER_API_KEY="..."   # or store it in ~/.llmjury/.env
 llmjury solve --task task.txt --tests tests.py --entry-point solve \
-    --backend ollama --frontier auto --json
+    --backend ollama --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" \
+    --frontier-backend codex --json
 ```
 
-The distinction matters: **the council is local and private through Ollama; the DeepSeek
-models are open-weight but remotely hosted through OpenRouter.** A task leaves the machine
-only after every local candidate fails verification. The CLI prints the selected stage and
-model, so an orchestrating Codex session can report when paid escalation actually occurred.
-
-`auto` uses a capability ladder instead of guessing difficulty from task keywords. The
-verifier is the router: Flash gets the first inexpensive recovery attempt, Pro receives only
-the unresolved tail, and neither can introduce an accepted regression because its output must
-pass the same tests.
-
-To use authenticated Codex itself as the final provider instead of OpenRouter:
-
-```bash
-llmjury solve --task task.txt --tests tests.py --entry-point solve \
-    --backend ollama --frontier gpt-5.6-sol --frontier-backend codex
-```
-
-That path reuses `codex login`, launches an ephemeral read-only generation session, ignores
+The council runs through local Ollama. The fallback reuses `codex login` and the Codex
+subscription, so this workflow does not call OpenRouter. The CLI reports the accepted
+stage and model. The fallback launches an ephemeral read-only generation session, ignores
 repository rules and user configuration, and disables shell tools. Pin any explicit
 OpenRouter slug with `--frontier <provider/model>` when reproducing a benchmark or comparing
 a particular model.

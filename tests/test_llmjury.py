@@ -943,6 +943,8 @@ def test_codex_skill_drives_verified_native_app_workflow():
     assert "Codex app" in SKILL
     assert "llmjury solve --task" in SKILL
     assert "--backend ollama" in SKILL
+    assert '--frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" --frontier-backend codex' in SKILL
+    assert "--frontier auto" not in SKILL
     assert '"verified": true' in SKILL
     assert "Do not integrate" in SKILL
     assert "llmjury plan" in SKILL
