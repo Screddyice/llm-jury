@@ -243,7 +243,7 @@ verifier, then uses the authenticated Codex CLI:
 ```text
 The host agent frames the task and oracle
   → Gemma 3 12B on local Ollama
-  → Llama 3.1 8B + Phi-4 Mini only if Gemma fails
+  → Llama 3.1 8B only if Gemma fails
   → the host's authenticated Codex CLI if local candidates fail
   → return the first candidate that passes the oracle
 ```
@@ -315,25 +315,23 @@ read as a separately measured benchmark result until that exact policy is reprod
 
 - **Ollama (local, free, private)** — `--backend ollama`. Pull the council first:
   ```bash
-  ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b
+  ollama pull gemma3:12b && ollama pull llama3.1:8b
   ```
-  The local council mirrors the lineages of the benchmarked cloud panel — Google /
-  Meta / Microsoft — so the measured numbers describe something reproducible
-  off-cloud. The mirror is not exact and cannot be: `phi-4` is 12.7 GiB locally, and
-  the benchmarked trio `phi4 + gemma3:12b + llama3.1:8b` projects 31.7 GiB against a
-  25.2 GiB budget on a 36 GiB host. No `num_ctx` or slot count fits it, since the
-  weights alone are ~28 GiB. `phi-4` is therefore substituted by `phi4-mini:3.8b`
-  from the same family, keeping all three labs on the council. **For exact benchmark
-  fidelity use `--backend openrouter`, which runs `CLOUD_PANEL` unchanged.**
+  The default local council uses Gemma 3 12B and Llama 3.1 8B. On this 36 GiB
+  host, the former three-model panel also loaded Phi-4 Mini and projected 26.5 GiB
+  once each runner's prompt cache was counted. The 23.4 GiB residency budget
+  refused that panel before it could run. The two-model panel projects 21.0 GiB
+  at 8,192 context tokens and two Ollama slots. Use `--models` to add Phi-4 Mini
+  on a host with enough headroom. The published three-lineage cloud benchmark
+  remains available through the explicit OpenRouter backend.
 
   The default **requires `OLLAMA_NUM_PARALLEL=2`**. KV cache is charged
-  `num_ctx x slots`, so parallelism multiplies memory for every model on the server
-  and is part of a panel's spec:
+  `num_ctx x slots`, so parallelism multiplies memory for every model on the server:
 
-  | slots | projected | 36 GiB host, budget 25.2 GiB |
-  |-------|-----------|------------------------------|
-  | 2     | 23.4 GiB  | fits                         |
-  | 4 (Ollama default) | 27.3 GiB | refused, with a hint |
+  | slots | two-model projection | 36 GiB host budget |
+  |-------|----------------------|--------------------|
+  | 2     | 21.0 GiB             | 23.4 GiB; admitted |
+  | 4     | 23.6 GiB             | 23.4 GiB; refused  |
 
   Set it on the server and tell the client, then restart Ollama:
   ```bash
@@ -342,11 +340,9 @@ read as a separately measured benchmark result until that exact policy is reprod
   # client: or the preflight assumes 4 and over-refuses panels that would fit
   export LLMJURY_OLLAMA_PARALLEL=2
   ```
-  Leaving Ollama at 4 slots is safe, just smaller: the preflight runs before any
-  model loads, so you get an actionable refusal naming a smaller panel rather than a
-  host that swaps itself to death. Use
-  `--models llama3.1:8b,phi4-mini:3.8b,granite4.1:3b` (19.7 GiB at 4 slots) if you
-  would rather not tune the server. `--models` is gated by the same preflight.
+  At four slots, the preflight refuses the two-model panel before loading it.
+  Select a smaller model, such as `--models phi4-mini:3.8b`, when tuning the server
+  is not practical. The same preflight checks every explicit panel.
 
   Pass any Ollama completion tag through `--models`, including Qwen, custom
   Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
@@ -622,7 +618,7 @@ likely way to hold the whole council resident at once.
 Measured on a 36 GiB Mac with the shipped local panel at `OLLAMA_NUM_PARALLEL=2`:
 
 ```
-llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b + phi4-mini:3.8b
+llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b
   single best model + verified best-of-4:   19/25 = 76.0%
   + diverse council (escalation):            +0  ->  19/25 = 76.0%
 ```
