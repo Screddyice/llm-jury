@@ -463,28 +463,30 @@ to a verified answer:
 Without a `--frontier` ladder there is nothing to escalate to, so the run still stops —
 and the error now points at `--frontier auto` as the way through.
 
-#### Standing down for Qwen 27B
+#### Qwen 27B takes local compute priority
 
-There is one refusal that does *not* escalate. [Backdoor](https://github.com/Screddyice/backdoor)
-gives `qwen3.8:27b-obliterated` exclusive compute when a Claude or Codex session selects
-it directly or fails over to it. Backdoor publishes circuit-breaker state to
+The Qwen launcher gives `qwen3.8:27b-obliterated` exclusive compute when a local Qwen,
+Claude, or Codex session selects it directly. The launcher preempts a cooperating local council or diff
+reviewer that holds the shared compute lock, then runs its normal pressure and RAM guards.
+It refuses to force-stop another Qwen or Ollama process. [Backdoor](https://github.com/Screddyice/backdoor)
+publishes circuit-breaker state to
 `~/.backdoor/failover-state.json` and writes short ownership leases under
 `~/.backdoor/compute-leases/` before local inference begins. LLM-Jury also checks
 Ollama's `/api/ps` output as a residency backstop.
 
 ```
 error: llm-jury is standing down; exclusive 27B compute is active.
-owner: claude-explicit owns qwen3.8:27b-obliterated
-The local council and every frontier provider, including OpenRouter, remain disabled
-until the 27B route releases the host.
+owner: qwen owns qwen3.8:27b-obliterated
+hint: add --frontier auto to skip the local council and use the remote verifier ladder.
 ```
 
-This gate runs before backend construction and ignores `--mem-check`, so it also blocks
-direct OpenRouter runs and verifier-gated frontier escalation. The lease closes the gap
-before Ollama reports the model as resident. An expired lease or one from a dead router
-process is ignored. Missing or unreadable state fails open. Point the probes elsewhere
-with `LLMJURY_ROUTER_STATE` and `LLMJURY_COMPUTE_LEASE_DIR` when testing an isolated
-router.
+Without `--frontier`, this gate runs before backend construction and keeps the run local
+and fail-closed. With `--frontier auto`, LLM-Jury skips local backend use and routes straight
+to the remote, verifier-gated ladder. That path does not load Ollama models or compete for
+the local lock. The lease closes the gap before Ollama reports the model as resident. An
+expired lease or one from a dead router process is ignored. Missing or unreadable state
+fails open. Point the probes elsewhere with `LLMJURY_ROUTER_STATE` and
+`LLMJURY_COMPUTE_LEASE_DIR` when testing an isolated router.
 
 One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
 into the *server* process, not into the client, so the preflight cannot read it and
@@ -507,6 +509,56 @@ The shipped panel is sized to fit a 36 GB host at ~19 GB and stays cross-lineage
 council, because LLM-Jury verifies rather than votes: weaker panelists escalate to the
 frontier ladder more often instead of returning worse answers. On a larger host, pass a
 stronger panel through `--models`.
+
+### Spend ledger
+
+Every metered OpenRouter call appends one line to `~/.llmjury/spend.jsonl`
+(override with `LLMJURY_SPEND_LEDGER`):
+
+```json
+{"ts": "2026-09-11T12:40:00+00:00", "backend": "openrouter",
+ "model": "deepseek/deepseek-v4-flash", "prompt_tokens": 100,
+ "completion_tokens": 20, "cost_usd": 0.0025}
+```
+
+`cost_usd` is the charge OpenRouter reports for that call — requests are sent with
+`usage: {include: true}` — not a local price table that goes stale the next time a
+model is repriced.
+
+**Subscription-served escalations are recorded too, as spend that did not happen.**
+`--frontier-backend codex` (and the Claude CLI backend) authenticate from their own CLI
+session, so the call is covered by a subscription already paid for and no metered request
+is made. Nothing reached this ledger, and a report reading it saw OpenRouter usage of
+zero — true, but indistinguishable from "the frontier ladder never ran" when what
+actually happened is "it ran for free". Those rows carry `billing: "subscription"`,
+`cost_usd: 0.0`, and an `avoided_usd` estimate of the OpenRouter charge that did not
+occur:
+
+```json
+{"ts": "...", "backend": "codex", "model": "gpt-5.6-sol", "billing": "subscription",
+ "prompt_tokens": 1000, "completion_tokens": 200, "cost_usd": 0.0,
+ "avoided_usd": 0.00072, "estimated": true}
+```
+
+`estimated: true` is not decoration. The CLI returns text, not token counts, so tokens
+are inferred from characters at four per token, and the rate is deepseek-v4-pro's —
+the ladder's middle rung. The cheaper first rung and the far dearer Anthropic rung
+bracket it, so the figure deliberately under-claims rather than flatters. Override with
+`LLMJURY_AVOIDED_INPUT_PER_MTOK` / `LLMJURY_AVOIDED_OUTPUT_PER_MTOK`. Filter on
+`billing` to keep measured spend and avoided spend apart; never add them together.
+
+This exists because llm-jury's frontier ladder spends real money in its own process,
+so none of it shows up in a Claude or Codex transcript and a usage report reading
+those transcripts cannot see it. The consumer (backdoor's weekly model-economics
+report) reads this file rather than `OPENROUTER_API_KEY`: one system should not hold
+another's credential, and an account-wide total could not be attributed to a client
+anyway.
+
+Recording is best-effort and never raises. A billing side-effect that can fail the
+solve it was measuring is worse than no ledger, so a ledger that cannot be written is
+silently skipped. A call that never returned a response is never recorded — it was
+never billed, and counting it would overstate spend. The file is append-only and
+nothing rotates it; delete it when it gets large.
 
 ### Caching
 
@@ -685,6 +737,11 @@ current preflight before starting a council on a busy desktop.
 
 Python `>=3.9`, managed with **uv** (`uv.lock` committed). The package installs the
 `llmjury` and `jury` console scripts. No Node toolchain.
+
+The lock covers local development only. CI installs nothing and runs
+`python tests/test_llmjury.py` and `python tests/test_memory_pressure.py` straight
+against the stdlib on 3.9, 3.11 and 3.12, so a test that reaches for a dependency
+passes here and fails there.
 
 ```bash
 uv sync

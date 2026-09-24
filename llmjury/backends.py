@@ -16,6 +16,8 @@ import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
+from . import spend
+
 from .cache import Cache
 from .cliproc import run_cli
 
@@ -128,6 +130,10 @@ class OpenRouterBackend(Backend):
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # Ask OpenRouter to return the actual charge for this call, so the
+            # spend ledger records money rather than a local price estimate
+            # that drifts every time a model is repriced.
+            "usage": {"include": True},
         }).encode()
         h = {
             "Authorization": f"Bearer {self.key}",
@@ -149,6 +155,10 @@ class OpenRouterBackend(Backend):
                     sys.stderr.write(f"[llmjury] openrouter {model}: empty response\n")
                     return ""
                 m = choices[0].get("message", {}) or {}
+                # Record before returning, and only for a call that produced a
+                # response: a retried attempt that never answered was never
+                # billed, and counting it would overstate spend.
+                spend.record(self.name, model, d.get("usage"))
                 return m.get("content") or _answer_from_reasoning(m.get("reasoning"))
             except urllib.error.HTTPError as e:
                 if e.code in _RETRYABLE:
@@ -227,7 +237,12 @@ class CodexBackend(Backend):
                     f"[llmjury] codex {model or '(configured default)'} exited "
                     f"{completed.returncode}{suffix}\n")
                 return ""
-            return (completed.stdout or "").strip()
+            answer = (completed.stdout or "").strip()
+            # A subscription served this, so nothing was metered -- which is
+            # exactly why it was invisible. Record what it avoided paying.
+            spend.record_subscription(self.name, model or "(configured default)",
+                                      prompt=prompt, completion=answer)
+            return answer
 
 
 class ClaudeBackend(Backend):
@@ -291,7 +306,12 @@ class ClaudeBackend(Backend):
                     f"[llmjury] claude {model or '(configured default)'} exited "
                     f"{completed.returncode}{suffix}\n")
                 return ""
-            return (completed.stdout or "").strip()
+            answer = (completed.stdout or "").strip()
+            # Same as the Codex path: the Claude Code subscription covers this,
+            # so nothing is metered and nothing would otherwise be recorded.
+            spend.record_subscription(self.name, model or "(configured default)",
+                                      prompt=prompt, completion=answer)
+            return answer
 
 
 class DemoBackend(Backend):
