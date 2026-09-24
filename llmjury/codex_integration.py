@@ -41,18 +41,20 @@ trustworthy oracle. Honor requests to skip fusion or write the change without it
 1. Read the repository instructions and inspect the target code and tests.
 2. Tell the user which unit and oracle you will send to the jury.
 3. Create a task file plus a verifier file or cases file outside tracked source.
-4. Use the Codex app's terminal execution tool to run a local-first jury:
+4. Use the Codex app's terminal execution tool to run the local council first,
+   then the authenticated Codex CLI only if the verifier rejects local candidates:
 
 ```bash
 llmjury solve --task "$task_file" --tests "$tests_file" \\
-  --entry-point function_name --backend ollama --frontier auto --json
+  --entry-point function_name --backend ollama \\
+  --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" --frontier-backend codex --json
 ```
 
 Use `--cases "$cases_file"` instead of `--tests` for JSON cases. Omit
 `--entry-point` for stdin/stdout programs. If the user requests a private local run,
-or no OpenRouter credential exists, omit `--frontier auto` and keep
-`--backend ollama`. Report any OpenRouter escalation and the model that produced the
-accepted candidate.
+omit both frontier flags. This Codex workflow uses OpenRouter only when the user
+explicitly requests an OpenRouter model or comparison. Report when the authenticated
+Codex CLI produced the accepted candidate.
 
 5. Accept output only when the command exits with status 0 and the JSON contains
    `"verified": true`. Do not integrate an unverified answer. Inspect verified code
@@ -60,9 +62,10 @@ accepted candidate.
 6. Run the repository's focused tests after integration, inspect the diff, and remove
    temporary files.
 
-Keep the default generated-code sandbox enabled. Avoid `--backend codex` from inside
-the Codex app unless the user requests a Codex-provider comparison. A nested Codex
-session adds cost without adding model-family diversity.
+Keep the default generated-code sandbox enabled. The Codex CLI fallback uses the
+existing Codex login and subscription, without an OpenRouter API key. Use it only
+after local verification fails; avoid `--backend codex` as the first tier unless the
+user requests a Codex-provider comparison.
 
 ## Optional planning
 

@@ -409,6 +409,12 @@ def test_cli_backend_can_enable_ollama_thinking():
     assert backend.think is True
 
 
+def test_frontier_label_keeps_explicit_codex_model_intact():
+    from llmjury.cli import _frontier_label
+    assert _frontier_label("gpt-5.6-sol") == "gpt-5.6-sol"
+    assert _frontier_label(["model-a", "model-b"]) == "model-a -> model-b"
+
+
 def test_cli_auto_frontier_resolves_open_source_ladder():
     from llmjury.cli import _frontier_models
     from llmjury.panels import AUTO_FRONTIER, OPEN_SOURCE_FRONTIER
@@ -943,6 +949,8 @@ def test_codex_skill_drives_verified_native_app_workflow():
     assert "Codex app" in SKILL
     assert "llmjury solve --task" in SKILL
     assert "--backend ollama" in SKILL
+    assert '--frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" --frontier-backend codex' in SKILL
+    assert "--frontier auto" not in SKILL
     assert '"verified": true' in SKILL
     assert "Do not integrate" in SKILL
     assert "llmjury plan" in SKILL
@@ -1046,8 +1054,12 @@ def test_memguard_allows_the_shipped_panel_at_its_documented_parallelism():
     from llmjury import memguard, panels
     restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
     try:
+        memguard.prompt_cache_bytes = lambda: memguard.GB
         report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=2)
         assert report.ok, f"default panel must fit a 36 GB host at 2 slots: {report.message()}"
+        former = memguard.check(panels.LOCAL_PANEL + ["phi4-mini:3.8b"],
+                                num_ctx=8192, parallel=2)
+        assert not former.ok, "the former three-model default must account for prompt caches"
     finally:
         restore()
 
@@ -1068,30 +1080,19 @@ def test_reproduce_pins_num_ctx_on_the_ollama_backend():
     assert reproduce._backend("ollama", num_ctx=2048).num_ctx == 2048
 
 
-def test_local_panel_mirrors_cloud_panel_lineages():
-    """The local council is meant to be the benchmarked council, run locally.
-
-    CLOUD_PANEL is what the published numbers were measured with. LOCAL_PANEL mirrors
-    its *lineages* so those numbers describe something reproducible off-cloud. Exact
-    tags cannot match (phi-4 is 12.7 GiB locally and no 3-model panel holding it fits a
-    36 GiB host), so a panelist may be swapped for a smaller model from the SAME lab —
-    never for a different lab, which would silently drop a lineage from the council and
-    make the benchmark a weaker description of local behaviour.
-    """
+def test_local_panel_retains_two_benchmark_lineages():
+    """The safe local pair keeps two labs; the third needs more host memory."""
     from llmjury import panels
     lineage = {
-        "microsoft/phi-4": "microsoft", "phi4": "microsoft", "phi4-mini:3.8b": "microsoft",
+        "microsoft/phi-4": "microsoft", "phi4-mini:3.8b": "microsoft",
         "google/gemma-3-12b-it": "google", "gemma3:12b": "google",
         "meta-llama/llama-3.1-8b-instruct": "meta", "llama3.1:8b": "meta",
-        "granite4.1:3b": "ibm", "qwen3:8b": "alibaba", "qwen3.5:4b": "alibaba",
     }
-    missing = [m for m in panels.CLOUD_PANEL + panels.LOCAL_PANEL if m not in lineage]
-    assert not missing, f"unmapped model, extend the lineage table: {missing}"
-    cloud = sorted(lineage[m] for m in panels.CLOUD_PANEL)
-    local = sorted(lineage[m] for m in panels.LOCAL_PANEL)
-    assert local == cloud, (
-        f"local council must mirror the benchmarked lineages {cloud}, got {local}. "
-        "Substitute within a lab (phi-4 -> phi4-mini), do not swap labs.")
+    assert all(model in lineage for model in panels.CLOUD_PANEL + panels.LOCAL_PANEL)
+    assert len({lineage[model] for model in panels.LOCAL_PANEL}) == 2
+    assert {lineage[model] for model in panels.LOCAL_PANEL} <= {
+        lineage[model] for model in panels.CLOUD_PANEL
+    }
 
 
 def test_memguard_refuses_the_shipped_panel_at_stock_parallelism():
@@ -1105,6 +1106,7 @@ def test_memguard_refuses_the_shipped_panel_at_stock_parallelism():
     from llmjury import memguard, panels
     restore = _fake_ollama(HOST_36GB, {t: g for t, g, _ in MEASURED})
     try:
+        memguard.prompt_cache_bytes = lambda: memguard.GB
         report = memguard.check(panels.LOCAL_PANEL, num_ctx=8192, parallel=4)
         assert not report.ok, "default panel at 4 slots must refuse, not silently fit"
         assert "smaller panel" in report.hint()

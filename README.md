@@ -189,11 +189,13 @@ terminal tool, and accepts a candidate only when the JSON result contains
 
 ```bash
 llmjury solve --task task.txt --tests tests.py --entry-point solve \
-    --backend ollama --frontier auto --json
+    --backend ollama --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" \
+    --frontier-backend codex --json
 ```
 
-The skill keeps private runs local when the user requests them or OpenRouter has no
-credential. Codex runs the repository's tests after it applies a verified candidate.
+The skill omits the frontier when the user requests a private local run. It uses the
+authenticated Codex CLI after local candidates fail verification, without OpenRouter
+API charges. Codex runs the repository's tests after it applies a verified candidate.
 It does not send prose, architecture, UI judgment, or code without a trustworthy
 oracle to the jury.
 
@@ -235,45 +237,28 @@ Use `--scope project` to install the Claude skill in only the current repository
 
 ## Codex Fusion
 
-The recommended Codex workflow keeps candidate generation local until the verifier proves
-the local council needs help:
+The Codex app's default jury workflow uses local models while they can satisfy the
+verifier, then uses the authenticated Codex CLI:
 
 ```text
 The host agent frames the task and oracle
-  → Phi-4 on local Ollama
-  → Gemma 3 12B + Llama 3.1 8B only if Phi-4 fails
-  → DeepSeek V4 Flash on OpenRouter only if the local council fails
-  → DeepSeek V4 Pro only if Flash also fails
-  → the host's authenticated Codex or Claude CLI if OpenRouter fails
+  → Gemma 3 12B on local Ollama
+  → Llama 3.1 8B only if Gemma fails
+  → the host's authenticated Codex CLI if local candidates fail
   → return the first candidate that passes the oracle
 ```
 
 Run that policy with:
 
 ```bash
-export OPENROUTER_API_KEY="..."   # or store it in ~/.llmjury/.env
 llmjury solve --task task.txt --tests tests.py --entry-point solve \
-    --backend ollama --frontier auto --json
+    --backend ollama --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" \
+    --frontier-backend codex --json
 ```
 
-The distinction matters: **the council is local and private through Ollama; the DeepSeek
-models are open-weight but remotely hosted through OpenRouter.** A task leaves the machine
-only after every local candidate fails verification. The CLI prints the selected stage and
-model, so an orchestrating Codex session can report when paid escalation actually occurred.
-
-`auto` uses a capability ladder instead of guessing difficulty from task keywords. The
-verifier is the router: Flash gets the first inexpensive recovery attempt, Pro receives only
-the unresolved tail, and neither can introduce an accepted regression because its output must
-pass the same tests.
-
-To use authenticated Codex itself as the final provider instead of OpenRouter:
-
-```bash
-llmjury solve --task task.txt --tests tests.py --entry-point solve \
-    --backend ollama --frontier gpt-5.6-sol --frontier-backend codex
-```
-
-That path reuses `codex login`, launches an ephemeral read-only generation session, ignores
+The council runs through local Ollama. The fallback reuses `codex login` and the Codex
+subscription, so this workflow does not call OpenRouter. The CLI reports the accepted
+stage and model. The fallback launches an ephemeral read-only generation session, ignores
 repository rules and user configuration, and disables shell tools. Pin any explicit
 OpenRouter slug with `--frontier <provider/model>` when reproducing a benchmark or comparing
 a particular model.
@@ -330,25 +315,23 @@ read as a separately measured benchmark result until that exact policy is reprod
 
 - **Ollama (local, free, private)** — `--backend ollama`. Pull the council first:
   ```bash
-  ollama pull gemma3:12b && ollama pull llama3.1:8b && ollama pull phi4-mini:3.8b
+  ollama pull gemma3:12b && ollama pull llama3.1:8b
   ```
-  The local council mirrors the lineages of the benchmarked cloud panel — Google /
-  Meta / Microsoft — so the measured numbers describe something reproducible
-  off-cloud. The mirror is not exact and cannot be: `phi-4` is 12.7 GiB locally, and
-  the benchmarked trio `phi4 + gemma3:12b + llama3.1:8b` projects 31.7 GiB against a
-  25.2 GiB budget on a 36 GiB host. No `num_ctx` or slot count fits it, since the
-  weights alone are ~28 GiB. `phi-4` is therefore substituted by `phi4-mini:3.8b`
-  from the same family, keeping all three labs on the council. **For exact benchmark
-  fidelity use `--backend openrouter`, which runs `CLOUD_PANEL` unchanged.**
+  The default local council uses Gemma 3 12B and Llama 3.1 8B. On this 36 GiB
+  host, the former three-model panel also loaded Phi-4 Mini and projected 26.5 GiB
+  once each runner's prompt cache was counted. The 23.4 GiB residency budget
+  refused that panel before it could run. The two-model panel projects 21.0 GiB
+  at 8,192 context tokens and two Ollama slots. Use `--models` to add Phi-4 Mini
+  on a host with enough headroom. The published three-lineage cloud benchmark
+  remains available through the explicit OpenRouter backend.
 
   The default **requires `OLLAMA_NUM_PARALLEL=2`**. KV cache is charged
-  `num_ctx x slots`, so parallelism multiplies memory for every model on the server
-  and is part of a panel's spec:
+  `num_ctx x slots`, so parallelism multiplies memory for every model on the server:
 
-  | slots | projected | 36 GiB host, budget 25.2 GiB |
-  |-------|-----------|------------------------------|
-  | 2     | 23.4 GiB  | fits                         |
-  | 4 (Ollama default) | 27.3 GiB | refused, with a hint |
+  | slots | two-model projection | 36 GiB host budget |
+  |-------|----------------------|--------------------|
+  | 2     | 21.0 GiB             | 23.4 GiB; admitted |
+  | 4     | 23.6 GiB             | 23.4 GiB; refused  |
 
   Set it on the server and tell the client, then restart Ollama:
   ```bash
@@ -357,11 +340,9 @@ read as a separately measured benchmark result until that exact policy is reprod
   # client: or the preflight assumes 4 and over-refuses panels that would fit
   export LLMJURY_OLLAMA_PARALLEL=2
   ```
-  Leaving Ollama at 4 slots is safe, just smaller: the preflight runs before any
-  model loads, so you get an actionable refusal naming a smaller panel rather than a
-  host that swaps itself to death. Use
-  `--models llama3.1:8b,phi4-mini:3.8b,granite4.1:3b` (19.7 GiB at 4 slots) if you
-  would rather not tune the server. `--models` is gated by the same preflight.
+  At four slots, the preflight refuses the two-model panel before loading it.
+  Select a smaller model, such as `--models phi4-mini:3.8b`, when tuning the server
+  is not practical. The same preflight checks every explicit panel.
 
   Pass any Ollama completion tag through `--models`, including Qwen, custom
   Modelfiles, and fine-tunes. LLM-Jury disables model thinking by default so the
@@ -637,7 +618,7 @@ likely way to hold the whole council resident at once.
 Measured on a 36 GiB Mac with the shipped local panel at `OLLAMA_NUM_PARALLEL=2`:
 
 ```
-llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b + phi4-mini:3.8b
+llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b
   single best model + verified best-of-4:   19/25 = 76.0%
   + diverse council (escalation):            +0  ->  19/25 = 76.0%
 ```

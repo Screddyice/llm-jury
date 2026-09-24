@@ -69,6 +69,11 @@ def _frontier_models(value, backend_name):
     return list(FRONTIER_ALIASES[value])
 
 
+def _frontier_label(frontier):
+    """Render either one explicit model or an ordered model ladder."""
+    return " -> ".join([frontier] if isinstance(frontier, str) else frontier)
+
+
 def _codex_frontier_rescue(value, backend_name):
     """Return the authenticated Codex rescue model for `auto` inside Codex.
 
@@ -230,7 +235,7 @@ def _cmd_solve(a, force_frontier=False, exclusive_owner=None):
         route_start = "exclusive local compute -> " if force_frontier else "local council -> "
         sys.stderr.write(
             f"[llmjury] {a.frontier} route: " + route_start
-            + " -> ".join(frontier) + " (verifier-gated)\n")
+            + _frontier_label(frontier) + " (verifier-gated)\n")
     if rescue_model:
         host = "Claude Code" if rescue_backend == "claude" else "Codex"
         provider = "Claude" if rescue_backend == "claude" else "Codex"
@@ -247,7 +252,7 @@ def _cmd_solve(a, force_frontier=False, exclusive_owner=None):
         owner_label = exclusive_owner or owner or "Qwen 27B"
         sys.stderr.write(
             f"[llmjury] {owner_label} owns local compute; skipping the local council "
-            "and routing directly to " + " -> ".join(frontier) + " "
+            "and routing directly to " + _frontier_label(frontier) + " "
             f"on {a.frontier_backend} (remote, verifier-gated)\n")
     fb = None
     if frontier:
@@ -292,7 +297,7 @@ def _cmd_solve(a, force_frontier=False, exclusive_owner=None):
                         )
                         sys.stderr.write(
                             "[llmjury] skipping the local council; escalating straight to "
-                            + " -> ".join(frontier) + f" on {frontier_providers} "
+                            + _frontier_label(frontier) + f" on {frontier_providers} "
                             "(remote, needs no memory on this host)\n")
                     elif report.terminal:
                         sys.exit(f"error: llm-jury is standing down.\nhint: {report.hint()}")
