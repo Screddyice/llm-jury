@@ -386,6 +386,79 @@ def test_claude_backend_runs_ephemeral_tool_free_generation():
     assert cwd_existed and kw["timeout"] == 600 and not kw["check"]
 
 
+def _with_env(overrides, fn):
+    saved = {k: os.environ.get(k) for k in overrides}
+    try:
+        for k, v in overrides.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        return fn()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_claude_backend_falls_back_to_default_login_when_config_dir_has_none():
+    # The Claude desktop app runs sessions with CLAUDE_CONFIG_DIR pointing at a
+    # directory that holds no login of its own (the app authenticates its own
+    # process). A nested `claude` there prints "Not logged in" on stdout and
+    # exits 1, which silently killed the final rescue tier.
+    import contextlib
+    import io
+    from llmjury.backends import ClaudeBackend
+
+    envs = []
+
+    def runner(cmd, **kw):
+        envs.append(kw["env"].get("CLAUDE_CONFIG_DIR"))
+        if kw["env"].get("CLAUDE_CONFIG_DIR"):
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="Not logged in · Please run /login\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=_GOOD + "\n", stderr="")
+
+    err = io.StringIO()
+
+    def run():
+        backend = ClaudeBackend(runner=runner)
+        with contextlib.redirect_stderr(err):
+            first = backend.complete("opus", "write add", n=1)
+            second = backend.complete("opus", "write add again", n=1)
+        return first, second
+
+    first, second = _with_env(
+        {"CLAUDECODE": "1", "CLAUDE_CONFIG_DIR": "/tmp/no-login-here"}, run)
+    assert first == [_GOOD] and second == [_GOOD]
+    # One failed attempt under the configured dir, then the default login for
+    # this call and every later one.
+    assert envs == ["/tmp/no-login-here", None, None]
+    assert "not logged in" in err.getvalue().lower()
+    assert "/tmp/no-login-here" in err.getvalue()
+
+
+def test_claude_backend_reports_stdout_reason_when_stderr_is_empty():
+    import contextlib
+    import io
+    from llmjury.backends import ClaudeBackend
+
+    def runner(cmd, **kw):
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="Not logged in · Please run /login\n", stderr="")
+
+    err = io.StringIO()
+
+    def run():
+        with contextlib.redirect_stderr(err):
+            return ClaudeBackend(runner=runner).complete("opus", "write add", n=1)
+
+    assert _with_env({"CLAUDECODE": "1", "CLAUDE_CONFIG_DIR": None}, run) == [""]
+    assert "exited 1: Not logged in" in err.getvalue()
+
+
 def test_cli_backend_builds_codex_provider():
     from unittest.mock import patch
     from llmjury.cli import _backend
@@ -866,6 +939,19 @@ def test_install_claude_fusion_agent_is_router_independent():
             pass
         _, changed = install_claude_agent("project", project, force=True)
         assert changed and path.read_text(encoding="utf-8") == AGENT
+
+
+def test_fusion_agent_preflight_checks_the_default_local_panel():
+    # The agent's preflight once required `phi4`, a tag the default panel dropped
+    # after that panel over-committed a 36 GB host. An agent that insists on a
+    # model nobody pulls stops every run before it starts.
+    from llmjury.claude_integration import AGENT, SKILL
+    from llmjury.panels import LOCAL_BEST, LOCAL_PANEL
+
+    for tag in [LOCAL_BEST, *LOCAL_PANEL]:
+        assert f"`{tag}`" in AGENT, tag
+    assert "`phi4`" not in AGENT
+    assert "Phi-4" not in SKILL
 
 
 def test_claude_planner_is_read_only_and_parses_structured_envelope():

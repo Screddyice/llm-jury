@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Keep the Claude rescue working in Claude desktop sessions.** The desktop app points
+  `CLAUDE_CONFIG_DIR` at a directory with no login, so the nested `claude` printed
+  "Not logged in" on stdout, exited 1, and the run ended unverified with no reason shown.
+  `ClaudeBackend` now retries once with the default `~/.claude` login and says so on
+  stderr, and a failed call reports the CLI's reason from stdout when stderr is empty.
+  The shipped `llm-jury-fusion` agent's preflight now names the default Ollama panel
+  from `panels.py` instead of `phi4`, a tag the panel dropped; a test keeps them in step.
+
 - **Remove the Grok CLI provider.** The Grok Build CLI was removed from the reference
   host, leaving `GrokBackend`, `--backend grok`, `--frontier-backend grok`, the
   `install-grok` skill installer, and the `GROK_BEST`/`GROK_PANEL` entries with no CLI

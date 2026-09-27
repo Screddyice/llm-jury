@@ -4,6 +4,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .panels import LOCAL_BEST, LOCAL_PANEL
+
+
+def _panel_tags():
+    """The default Ollama council, rendered for the agent's preflight check."""
+    tags = list(dict.fromkeys([LOCAL_BEST, *LOCAL_PANEL]))
+    quoted = [f"`{t}`" for t in tags]
+    return ", ".join(quoted[:-1]) + f" and {quoted[-1]}" if len(quoted) > 1 else quoted[0]
+
 
 SKILL = """\
 ---
@@ -29,8 +38,8 @@ checked with tests, lint, builds, or a focused diff review.
    only when concrete work remains.
 
 For a self-contained Python unit with a trustworthy oracle, let the execution agent
-use `llmjury solve --backend ollama` so Phi-4 and the local cross-lineage council get
-the first chance. The verifier, never a vote, decides whether their code is usable.
+use `llmjury solve --backend ollama` so the local cross-lineage council gets the
+first chance. The verifier, never a vote, decides whether their code is usable.
 Do not route prose, product judgment, architecture, secrets, deployments, or work
 without a reliable oracle through the local jury.
 
@@ -57,7 +66,7 @@ not a vote — decides what survives. "Don't vote, verify."
 1. `llmjury --version` — if missing, stop and report: `pipx install llm-jury-verify`.
 2. `curl -sf -m 2 http://localhost:11434/api/version` — if Ollama is down, stop
    and report it.
-3. `ollama list` must show `phi4`, `gemma3:12b`, and `llama3.1:8b`. If any tag is
+3. `ollama list` must show the default council: __PANEL_TAGS__. If any tag is
    missing, stop and report exactly which to `ollama pull` — never run a silently
    degraded single-lab council.
 
@@ -78,10 +87,13 @@ not a vote — decides what survives. "Don't vote, verify."
    In Claude Code, `auto` tries the OpenRouter ladder first and then launches an
    authenticated, tool-free Claude CLI call as the final rescue. The rescue runs in
    safe mode outside the repository and still must pass the same oracle.
+   `insufficient credits` means the OpenRouter account is empty and every
+   OpenRouter tier was skipped; say so in the report.
 4. **Report honestly.** On success, return the verified code verbatim plus the
    `stage / model / attempts` line. On failure, report the verifier output as a
    failure — never hand-write a "fixed" answer and present it as verified.
 """
+AGENT = AGENT.replace("__PANEL_TAGS__", _panel_tags())
 
 
 def skill_path(scope="user", project=None):

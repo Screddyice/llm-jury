@@ -364,6 +364,11 @@ read as a separately measured benchmark result until that exact policy is reprod
   starts in a temporary directory with safe mode, disables tools and permission prompts,
   and keeps session persistence off. Set `LLMJURY_CLAUDE_MODEL` to change the default
   from `opus`.
+  The Claude desktop app sets `CLAUDE_CONFIG_DIR` for its sessions, and that directory
+  can hold no login of its own. When the child `claude` answers "Not logged in", the
+  backend prints one line naming the directory and retries with the default
+  `~/.claude` login for that call and the rest of the run. A rescue that still fails
+  prints the CLI's own reason, taken from stdout when stderr is empty.
 
 The frontier provider is explicit. `--frontier-backend openrouter` accepts OpenRouter
 slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a model
