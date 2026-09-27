@@ -245,6 +245,14 @@ class CodexBackend(Backend):
             return answer
 
 
+def _not_logged_in(completed):
+    """True when a finished Claude Code run failed only because it has no login."""
+    if completed is None or completed.returncode == 0:
+        return False
+    text = f"{completed.stdout or ''}\n{completed.stderr or ''}".lower()
+    return "not logged in" in text
+
+
 class ClaudeBackend(Backend):
     """Generate candidates through the authenticated Claude Code CLI.
 
@@ -261,6 +269,8 @@ class ClaudeBackend(Backend):
         self.timeout = timeout
         self.effort = effort
         self.runner = runner or subprocess.run
+        # Set once a configured CLAUDE_CONFIG_DIR proves to have no login.
+        self._default_login = False
         if runner is None and not shutil.which(executable):
             raise RuntimeError(
                 "Claude Code not found. Install and authenticate Claude Code, or use "
@@ -285,11 +295,25 @@ class ClaudeBackend(Backend):
 
             child_env = os.environ.copy()
             child_env.pop("CLAUDECODE", None)
+            if self._default_login:
+                child_env.pop("CLAUDE_CONFIG_DIR", None)
 
             def invoke(command, **kwargs):
                 return self.runner(command, env=child_env, **kwargs)
 
             outcome = run_cli(invoke, cmd, self.timeout, cwd=workdir)
+            config_dir = child_env.get("CLAUDE_CONFIG_DIR")
+            if config_dir and _not_logged_in(outcome.completed):
+                # The Claude desktop app points CLAUDE_CONFIG_DIR at a directory
+                # with no login of its own; the app authenticates only its own
+                # process. The tool-free, safe-mode child needs nothing from that
+                # directory except auth, so use the default login instead.
+                sys.stderr.write(
+                    f"[llmjury] claude: not logged in under CLAUDE_CONFIG_DIR="
+                    f"{config_dir}; retrying with the default ~/.claude login\n")
+                self._default_login = True
+                child_env.pop("CLAUDE_CONFIG_DIR")
+                outcome = run_cli(invoke, cmd, self.timeout, cwd=workdir)
             if outcome.timed_out:
                 sys.stderr.write(
                     f"[llmjury] claude {model or '(configured default)'} timed out "
@@ -300,7 +324,10 @@ class ClaudeBackend(Backend):
                 return ""
             completed = outcome.completed
             if completed.returncode != 0:
-                detail = (completed.stderr or "").strip().splitlines()
+                # Claude Code prints some failures, such as a missing login, on
+                # stdout, so fall back to it when stderr is empty.
+                detail = ((completed.stderr or "").strip()
+                          or (completed.stdout or "").strip()).splitlines()
                 suffix = f": {detail[-1]}" if detail else ""
                 sys.stderr.write(
                     f"[llmjury] claude {model or '(configured default)'} exited "
