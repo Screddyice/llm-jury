@@ -6,7 +6,7 @@ independent verifier. Provider diversity is useful only when a real oracle exist
 ## Verification
 
 ```bash
-python3 tests/test_llmjury.py
+python3 -m pytest -q
 python3 -m llmjury.cli demo
 git diff --check
 ```
@@ -88,7 +88,11 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
   O(n log n) bound — their solutions are memorised. What escalates is a task whose shape
   is genuinely new, and the first cloud tier absorbs most of that. Treat any change that
   moves work to a later tier by default as a regression until a benchmark says otherwise.
-- The recommended hybrid route is `--backend ollama --frontier auto`: local council
-  first, then the ordered OpenRouter ladder only when verification fails.
+- The Codex workflow uses `--backend ollama --frontier gpt-5.6-sol
+  --frontier-backend codex`: local council first, then authenticated Codex when
+  local verification fails or ordinary memory admission refuses the panel.
+  Use the OpenRouter ladder only when the user requests it.
+- Exclusive Qwen 27B ownership stops every jury provider, including remote
+  frontiers. Do not turn this terminal refusal into a cloud fallback.
 - The verifier, not the provider, decides which candidate is accepted.
 - Never expose auth files, API keys, or the parent process environment to generated code.
