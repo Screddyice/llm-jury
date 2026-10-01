@@ -770,10 +770,14 @@ against the stdlib on 3.9, 3.11 and 3.12, so a test that reaches for a dependenc
 passes here and fails there.
 
 ```bash
-uv sync
+uv sync --locked
 uv run pytest
 uv run llmjury solve --task <f> --tests <f> --backend ollama --frontier auto
 ```
+
+The development lock includes the package's pytest dependency across supported
+Python versions. Run `uv lock --check` after changing dependencies to catch a
+stale lock before syncing. `uv sync --locked` preserves the reviewed resolution.
 
 `solve` requires a verifier (`--tests`, `--cases`, or `--entry-point`) and refuses to
 answer without one — that constraint is the product, not a limitation to work around.
