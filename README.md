@@ -190,7 +190,7 @@ terminal tool, and accepts a candidate only when the JSON result contains
 ```bash
 llmjury solve --task task.txt --tests tests.py --entry-point solve \
     --backend ollama --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" \
-    --frontier-backend codex --json
+    --frontier-backend codex --frontier-k 1 --jobs 2 --num-ctx 8192 --json
 ```
 
 The skill omits the frontier when the user requests a private local run. It uses the
@@ -253,7 +253,7 @@ Run that policy with:
 ```bash
 llmjury solve --task task.txt --tests tests.py --entry-point solve \
     --backend ollama --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" \
-    --frontier-backend codex --json
+    --frontier-backend codex --frontier-k 1 --jobs 2 --num-ctx 8192 --json
 ```
 
 The council runs through local Ollama. The fallback reuses `codex login` and the Codex
@@ -262,6 +262,26 @@ stage and model. The fallback launches an ephemeral read-only generation session
 repository rules and user configuration, and disables shell tools. Pin any explicit
 OpenRouter slug with `--frontier <provider/model>` when reproducing a benchmark or comparing
 a particular model.
+
+`--frontier-k 1` sends one generation to each frontier tier while retaining local
+best-of-4 sampling. Codex CLI frontiers default to one candidate even without this
+option, including Codex rescues in mixed-provider ladders. The budget follows the
+provider selected for each model; other CLI frontiers and Python callers retain
+their existing sampling defaults. An explicit `--frontier-k` applies to all tiers.
+If the first frontier candidate fails, inspect the verifier failure
+before increasing that budget. `--jobs 2` limits in-flight generation requests; it
+does not change the running Ollama server's decode-slot setting.
+Jury requests set `keep_alive` to 30 seconds so an idle completed solve does not
+retain its model for the server's default five minutes. Other clients keep their
+own retention settings. Python callers can supply `OllamaBackend(keep_alive="90s")`
+when repeated admitted runs justify a longer warm interval.
+
+The Codex skill also routes bounded semantic judgments to an available JEV tool.
+Send a compact evidence excerpt and rubric, batch independent questions about the
+same state, and review uncertain probabilities. JEV supplies advisory decisions;
+code decides memory admission, permissions, and test verdicts. LLM-Jury generates
+only code units with a reliable oracle. Keep repository writing and final review
+with Codex, and avoid sending the full conversation to either tool.
 
 ## How it works
 

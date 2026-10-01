@@ -157,6 +157,192 @@ _GOOD = "```python\ndef add(a, b):\n    return a + b\n```"
 _BAD = "```python\ndef add(a, b):\n    return a - b\n```"
 
 
+def test_sample_budgets_validate_counts_and_keep_default_frontier_behavior():
+    from llmjury.engine import sample_counts
+    assert sample_counts(4) == (4, 4)
+    assert sample_counts(4, 1) == (4, 1)
+    for bad in (0, -1, True, False, 1.0, "4", None):
+        try:
+            sample_counts(bad)
+            assert False, "invalid local count must be rejected"
+        except ValueError:
+            pass
+    for bad in (0, -1, True, False, 1.0, "1"):
+        try:
+            sample_counts(4, bad)
+            assert False, "invalid frontier count must be rejected"
+        except ValueError:
+            pass
+
+
+def test_frontier_sample_count_validates_selected_defaults_and_explicit_overrides():
+    from llmjury.engine import frontier_sample_count
+
+    assert frontier_sample_count(4, backend_name="codex", defaults={"codex": 1}) == 1
+    assert frontier_sample_count(4, backend_name="openrouter", defaults={"codex": 1}) == 4
+    assert frontier_sample_count(4, 3, "codex", {"codex": 0}) == 3
+    assert frontier_sample_count(4, backend_name="openrouter", defaults={"codex": 0}) == 4
+    for bad in (0, -1, True, False, 1.0, "4", None):
+        for args in ((bad, 1, "codex", {"codex": 1}), (4, None, "codex", {"codex": bad})):
+            try:
+                frontier_sample_count(*args)
+            except ValueError:
+                pass
+            else:
+                assert False, "invalid selected count must be rejected"
+
+
+def test_frontier_budget_reduces_generation_without_reducing_local_samples():
+    from llmjury.engine import Engine
+
+    class Verifier:
+        def verify(self, text):
+            return text == _GOOD
+
+    local = _FakeBackend({"best": [_BAD], "other": [_BAD]})
+    frontier = _FakeBackend({"top": [_GOOD]})
+    r = Engine(local, panel=["best", "other"], best="best", k=4, frontier_k=1,
+               frontier="top", frontier_backend=frontier).solve("add", Verifier())
+    assert r.verified and r.stage == "frontier"
+    assert [call[2] for call in local.calls] == [4, 4]
+    assert [call[2] for call in frontier.calls] == [1]
+
+
+def test_frontier_budget_reaches_individual_backend_submissions():
+    from llmjury.backends import Backend
+    from llmjury.engine import Engine
+
+    class RecordingBackend(Backend):
+        name = "codex"
+
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def _one(self, model, prompt, temperature, max_tokens):
+            self.calls.append(model)
+            return _GOOD
+
+    class Verifier:
+        def verify(self, text):
+            return text == _GOOD
+
+    backend = RecordingBackend()
+    r = Engine(backend, k=4, frontier_k=1, frontier="top", use_panel=False).solve("t", Verifier())
+    assert r.verified and backend.calls == ["top"]
+
+
+def test_smaller_frontier_budget_still_rejects_wrong_candidates():
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
+
+    frontier = _FakeBackend({"top": [_BAD]})
+    r = Engine(frontier, k=4, frontier_k=1, frontier="top", use_panel=False).solve(
+        "add", FunctionalCodeVerifier(_TESTS, "add"))
+    assert not r.verified and r.stage == "unverified"
+    assert frontier.calls[0][2] == 1
+
+
+def test_cli_rejects_invalid_sample_budget_before_provider_creation():
+    from unittest.mock import patch
+    from llmjury import cli
+
+    for option in ("--k", "--frontier-k"):
+        with patch.object(sys, "argv", ["llmjury", "solve", "--task", "unused", option, "0"]), patch(
+            "llmjury.cli._backend",
+        ) as backend:
+            try:
+                cli.main()
+                assert False, "invalid sample count must stop argument parsing"
+            except SystemExit as error:
+                assert error.code == 2
+            backend.assert_not_called()
+
+
+def test_cli_keeps_explicit_frontier_budget_separate_from_provider_defaults():
+    from unittest.mock import patch
+    from llmjury import cli
+
+    for provider, extra, expected in (
+        ("codex", [], None), ("openrouter", [], None), ("codex", ["--frontier-k", "3"], 3),
+    ):
+        argv = ["llmjury", "solve", "--task", "unused", "--frontier-backend", provider] + extra
+        with patch.object(sys, "argv", argv), patch.object(cli, "cmd_solve") as solve:
+            cli.main()
+            assert solve.call_args.args[0].frontier_k == expected
+            assert solve.call_args.args[0].k == 4
+
+
+def test_frontier_defaults_follow_the_actual_provider_and_preserve_python_defaults():
+    from llmjury.engine import Engine
+
+    class Verifier:
+        def verify(self, text):
+            return text == _GOOD
+
+    for explicit, defaults, counts in (
+        (None, {"codex": 1}, [4, 1]),
+        (3, {"codex": 1}, [3, 3]),
+        (None, None, [4, 4]),
+    ):
+        codex = _FakeBackend({"gpt": [_GOOD]})
+        codex.name = "codex"
+        openrouter = _FakeBackend({"flash": [_BAD]})
+        openrouter.name = "openrouter"
+        result = Engine(
+            codex, k=4, frontier_k=explicit, frontier_defaults=defaults,
+            frontier=["flash", "gpt"], frontier_backend=codex,
+            frontier_route={"flash": openrouter}, use_panel=False,
+        ).solve("add", Verifier())
+        assert result.verified and result.model == "gpt"
+        assert [openrouter.calls[0][2], codex.calls[0][2]] == counts
+
+
+def test_cli_codex_frontier_and_mixed_ladder_rescue_use_one_candidate():
+    from unittest.mock import patch
+    from llmjury import cli
+
+    for provider, mixed, explicit, expected in (
+        ("codex", False, [], [1]),
+        ("openrouter", False, [], [4]),
+        ("openrouter", True, [], [4, 1]),
+        ("openrouter", True, ["--frontier-k", "3"], [3, 3]),
+    ):
+        local = _FakeBackend({"local": [_BAD]})
+        local.name = "openrouter"
+        remote = _FakeBackend({"flash": [_BAD if mixed else _GOOD]})
+        remote.name = "openrouter"
+        codex = _FakeBackend({"gpt": [_GOOD]})
+        codex.name = "codex"
+        backends = {"openrouter": remote, "codex": codex}
+        calls = []
+
+        def backend(name, **kwargs):
+            calls.append(name)
+            return local if len(calls) == 1 else backends[name]
+
+        frontier = "auto" if mixed else "gpt" if provider == "codex" else "flash"
+        argv = ["llmjury", "solve", "--task", "task", "--cases", "cases",
+                "--entry-point", "add", "--backend", "openrouter", "--models", "local",
+                "--frontier", frontier, "--frontier-backend", provider, "--json"] + explicit
+        with patch.object(sys, "argv", argv), patch.object(
+            cli, "_require_compute_available",
+        ), patch.object(cli, "_backend", side_effect=backend), patch.object(
+            cli, "_read", side_effect=lambda path: '[{"args": [2, 3], "expected": 5}]'
+            if path == "cases" else "implement add",
+        ), patch.object(cli, "_frontier_models", return_value=["flash"] if mixed else frontier), patch.object(
+            cli, "_claude_frontier_rescue", return_value=None,
+        ), patch.object(cli, "_codex_frontier_rescue", return_value="gpt" if mixed else None), patch.object(
+            cli.os, "_exit",
+        ) as exit_process:
+            cli.main()
+            exit_process.assert_called_once_with(0)
+        observed = ([remote.calls[0][2]] if remote.calls else []) + (
+            [codex.calls[0][2]] if codex.calls else [])
+        assert observed == expected
+        assert local.calls[0][2] == 4
+
+
 def test_engine_single_when_best_solves():
     from llmjury.engine import Engine
     from llmjury.verifiers import FunctionalCodeVerifier
@@ -254,6 +440,7 @@ def test_ollama_backend_disables_thinking_by_default():
 
     body = json.loads(requests[0][0].data)
     assert body["think"] is False
+    assert body["keep_alive"] == "30s"
 
 
 def test_openrouter_timeout_is_reported_once_without_hidden_retries():
@@ -1001,7 +1188,7 @@ def test_validate_plan_rejects_malformed_steps():
 
 
 def test_install_codex_skill_is_idempotent_and_refuses_overwrite():
-    from llmjury.codex_integration import SKILL, install_codex_skill
+    from llmjury.codex_integration import SKILL, MANAGED_MARKER, install_codex_skill
 
     old_home = os.environ.get("CODEX_HOME")
     with tempfile.TemporaryDirectory() as codex_home:
@@ -1011,7 +1198,7 @@ def test_install_codex_skill_is_idempotent_and_refuses_overwrite():
             assert changed and path.read_text(encoding="utf-8") == SKILL
             same_path, changed = install_codex_skill()
             assert same_path == path and not changed
-            path.write_text(SKILL.replace("version: 2", "version: 1"), encoding="utf-8")
+            path.write_text(SKILL.replace(MANAGED_MARKER, "<!-- managed by llmjury install-codex; version: 1 -->"), encoding="utf-8")
             _, changed = install_codex_skill()
             assert changed and path.read_text(encoding="utf-8") == SKILL
             path.write_text("custom skill", encoding="utf-8")

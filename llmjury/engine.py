@@ -36,17 +36,40 @@ class Result:
     attempts: int           # samples that finished generating before the verdict
 
 
+def sample_counts(k, frontier_k=None):
+    def validate(value):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("sample counts must be positive integers")
+        return value
+
+    local_samples = validate(k)
+    frontier_samples = local_samples if frontier_k is None else validate(frontier_k)
+    return local_samples, frontier_samples
+
+
+def frontier_sample_count(k, frontier_k=None, backend_name="", defaults=None):
+    """Resolve the actual provider's default unless a shared budget was supplied."""
+    samples = frontier_k
+    if samples is None:
+        samples = k if defaults is None else defaults.get(backend_name, k)
+    if samples is None:
+        raise ValueError("sample counts must be positive integers")
+    return sample_counts(k, samples)[1]
+
+
 class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
                  k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
                  route=None, frontier_route=None, workers=None, frontier_max_tokens=None,
-                 use_panel=True):
+                 use_panel=True, frontier_k=None, frontier_defaults=None):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
         self.panel = panel or p
         self.prompt_template = prompt_template
-        self.k = k
+        self.k, self.frontier_k = sample_counts(k, frontier_k)
+        # Provider defaults apply only when the caller did not set a shared budget.
+        self.frontier_defaults = dict(frontier_defaults or {}) if frontier_k is None else {}
         self.max_tokens = max_tokens
         self.temperature = temperature
         # One model or an ordered verifier-gated ladder. Each model is attempted
@@ -79,8 +102,8 @@ class Engine:
         # in flight at once.
         self.workers = workers or min(16, max(4, self.k * max(1, len(self.panel))))
 
-    def _submit(self, ex, pairs, prompt, max_tokens=None):
-        """Queue k samples for every (model, backend) pair; return {future: model}.
+    def _submit(self, ex, pairs, prompt, max_tokens=None, samples=None):
+        """Queue stage samples for each (model, backend); return {future: model}.
 
         Backends that expose `submit` (all the built-ins) give one future per
         sample, so decoding interleaves across models and samples. A duck-typed
@@ -88,15 +111,16 @@ class Engine:
         batch — same result, just coarser overlap.
         """
         mt = max_tokens or self.max_tokens
+        n = self.k if samples is None else samples
         futs = {}
         for model, backend in pairs:
             if hasattr(backend, "submit"):
-                for f in backend.submit(ex, model, prompt, n=self.k,
+                for f in backend.submit(ex, model, prompt, n=n,
                                         temperature=self.temperature,
                                         max_tokens=mt):
                     futs[f] = model
             else:
-                futs[ex.submit(backend.complete, model, prompt, self.k,
+                futs[ex.submit(backend.complete, model, prompt, n,
                                self.temperature, mt)] = model
         return futs
 
@@ -117,9 +141,9 @@ class Engine:
         def frontier_backend_for(m):
             return self.frontier_route.get(m, self.frontier_backend)
 
-        def run_stage(ex, pairs, stage, max_tokens=None):
+        def run_stage(ex, pairs, stage, max_tokens=None, samples=None):
             for fut, model in _in_completion_order(
-                    self._submit(ex, pairs, prompt, max_tokens)):
+                    self._submit(ex, pairs, prompt, max_tokens, samples)):
                 out = fut.result()
                 for text in ([out] if isinstance(out, str) else out):
                     seen.append((model, text))
@@ -150,8 +174,12 @@ class Engine:
             # hard minority, not on every problem.
             if escalate and self.frontier:
                 for model in self.frontier:
-                    r = run_stage(ex, [(model, frontier_backend_for(model))], "frontier",
-                                  self.frontier_max_tokens)
+                    provider = frontier_backend_for(model)
+                    samples = frontier_sample_count(
+                        self.frontier_k, backend_name=provider.name,
+                        defaults=self.frontier_defaults)
+                    r = run_stage(ex, [(model, provider)], "frontier",
+                                  self.frontier_max_tokens, samples)
                     if r:
                         return r
         finally:

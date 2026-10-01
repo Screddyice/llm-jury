@@ -360,10 +360,12 @@ class DemoBackend(Backend):
 class OllamaBackend(Backend):
     name = "ollama"
 
-    def __init__(self, host="http://localhost:11434", num_ctx=None, think=False, **kw):
+    def __init__(self, host="http://localhost:11434", num_ctx=None, think=False,
+                 keep_alive="30s", **kw):
         super().__init__(**kw)
         self.host = host.rstrip("/")
         self.think = think
+        self.keep_alive = keep_alive
         # Per-request context cap. Ollama sizes a model's KV cache as
         # num_ctx x OLLAMA_NUM_PARALLEL at load, so a server tuned with a big
         # default context (e.g. 32k for coding-agent use) burns GPU memory on
@@ -383,6 +385,7 @@ class OllamaBackend(Backend):
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
             "think": self.think,
+            "keep_alive": self.keep_alive,
             "options": options,
         }).encode()
         for attempt in range(3):
