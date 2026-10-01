@@ -264,8 +264,9 @@ OpenRouter slug with `--frontier <provider/model>` when reproducing a benchmark 
 a particular model.
 
 `--frontier-k 1` sends one generation to each frontier tier while retaining local
-best-of-4 sampling. Without this option, frontier sampling inherits `--k` for backward
-compatibility. If the first frontier candidate fails, inspect the verifier failure
+best-of-4 sampling. Codex CLI frontiers default to one candidate even without this
+option; other CLI frontiers and Python callers retain their existing sampling defaults.
+If the first frontier candidate fails, inspect the verifier failure
 before increasing that budget. `--jobs 2` limits in-flight generation requests; it
 does not change the running Ollama server's decode-slot setting.
 Jury requests set `keep_alive` to 30 seconds so an idle completed solve does not

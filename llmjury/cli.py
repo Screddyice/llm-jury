@@ -463,7 +463,7 @@ def main():
                    choices=["openrouter", "ollama", "codex"])
     s.add_argument("--k", type=_positive_count, default=4, help="samples per local model (best-of-k)")
     s.add_argument("--frontier-k", type=_positive_count,
-                   help="samples per frontier model (default: inherit --k). Use 1 to "
+                   help="samples per frontier model (default: 1 for Codex, otherwise inherit --k). Use 1 to "
                    "avoid parallel subscription generations while retaining local best-of-k")
     s.add_argument("--jobs", type=int, default=None,
                    help="concurrent generation threads across a stage "
@@ -552,6 +552,8 @@ def main():
     c.set_defaults(func=cmd_install_codex)
 
     a = p.parse_args()
+    if a.cmd == "solve" and a.frontier_k is None and a.frontier_backend == "codex":
+        a.frontier_k = 1
     a.func(a)
 
 

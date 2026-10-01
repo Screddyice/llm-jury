@@ -242,6 +242,20 @@ def test_cli_rejects_invalid_sample_budget_before_provider_creation():
             backend.assert_not_called()
 
 
+def test_cli_codex_frontier_defaults_to_one_and_honors_explicit_budgets():
+    from unittest.mock import patch
+    from llmjury import cli
+
+    for provider, extra, expected in (
+        ("codex", [], 1), ("openrouter", [], None), ("codex", ["--frontier-k", "3"], 3),
+    ):
+        argv = ["llmjury", "solve", "--task", "unused", "--frontier-backend", provider] + extra
+        with patch.object(sys, "argv", argv), patch.object(cli, "cmd_solve") as solve:
+            cli.main()
+            assert solve.call_args.args[0].frontier_k == expected
+            assert solve.call_args.args[0].k == 4
+
+
 def test_engine_single_when_best_solves():
     from llmjury.engine import Engine
     from llmjury.verifiers import FunctionalCodeVerifier
