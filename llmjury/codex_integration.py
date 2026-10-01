@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 2 -->"
+MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 3 -->"
 MANAGED_PREFIX = "<!-- managed by llmjury install-codex; version:"
 LEGACY_MANAGED_DIGESTS = {
     "a2e067b1e03119e0ac9ea267b86db3f11e2a13c0a14a9cfc2f463011b3109a50",
@@ -18,7 +18,7 @@ SKILL = """\
 name: llm-jury-orchestrate
 description: Use LLM-Jury inside the Codex app for verifier-shaped code tasks, local-first fusion, and optional Claude planning.
 ---
-<!-- managed by llmjury install-codex; version: 2 -->
+<!-- managed by llmjury install-codex; version: 3 -->
 
 # LLM-Jury in the Codex app
 
@@ -36,6 +36,26 @@ function or JSON cases file in a temporary directory.
 Skip the jury for prose, architecture, UI judgment, configuration, or code without a
 trustworthy oracle. Honor requests to skip fusion or write the change without it.
 
+## Use JEV for bounded judgments
+
+Use the registered JEV tool for semantic classification, evidence checks, relevance,
+record matching, and choices from explicit permitted options. Supply the relevant
+input and rubric; omit conversation history and unrelated files. Batch up to ten
+independent questions about the same state. Start with a short evidence excerpt and
+expand only when it cannot support the decision. Keep the provider's request limits.
+Use lower_snake_case question keys and send state and questions as JSON objects,
+with description strings under each choice criterion.
+
+For advisory choices, confidence below 0.80 or a top-two probability gap below 0.20
+requires review. JEV cannot approve access, sends, merges, deployments, or spending.
+Use code for arithmetic, parsing, permissions, memory admission, and test verdicts.
+Keep writing, code implementation, architecture, and final review with Codex. A clear
+route does not need an extra JEV call. Preserve opt-outs and data restrictions.
+
+If JEV is unavailable, disclose the fallback and use Codex for that judgment. Never
+retry an uncertain billed request. Retain the compact result receipt when validating
+the route; avoid copying full tool payloads into later generation prompts.
+
 ## Run from the Codex app
 
 1. Read the repository instructions and inspect the target code and tests.
@@ -47,7 +67,8 @@ trustworthy oracle. Honor requests to skip fusion or write the change without it
 ```bash
 llmjury solve --task "$task_file" --tests "$tests_file" \\
   --entry-point function_name --backend ollama \\
-  --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" --frontier-backend codex --json
+  --frontier "${LLMJURY_CODEX_MODEL:-gpt-5.6-sol}" --frontier-backend codex \\
+  --frontier-k 1 --jobs 2 --num-ctx 8192 --json
 ```
 
 Use `--cases "$cases_file"` instead of `--tests` for JSON cases. Omit
@@ -55,6 +76,21 @@ Use `--cases "$cases_file"` instead of `--tests` for JSON cases. Omit
 omit both frontier flags. This Codex workflow uses OpenRouter only when the user
 explicitly requests an OpenRouter model or comparison. Report when the authenticated
 Codex CLI produced the accepted candidate.
+
+Keep the local best-of-k budget while starting the frontier with one candidate. If
+that candidate fails the oracle, inspect the failure before requesting a larger
+frontier budget. This avoids four concurrent subscription generations on routine
+fallbacks. Send only the function's contract and required context, then run repository
+tests after integration. Reuse identical tasks through the cache; use a unique task
+when live provider validation is required.
+
+On Macs, memory admission caps model residency at 65% of physical RAM and preserves
+4 GiB beyond current desktop needs. Warning pressure, unreadable probes, and exclusive
+27B ownership still refuse local inference. Never bypass a refusal or raise context
+to make a local run appear successful. Ordinary memory pressure may use the configured
+Codex frontier; exclusive ownership stops the entire jury run.
+Jury Ollama requests retain models for 30 seconds after generation, then let the
+server unload them; this does not change retention for other Ollama clients.
 
 5. Accept output only when the command exits with status 0 and the JSON contains
    `"verified": true`. Do not integrate an unverified answer. Inspect verified code

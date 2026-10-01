@@ -157,6 +157,91 @@ _GOOD = "```python\ndef add(a, b):\n    return a + b\n```"
 _BAD = "```python\ndef add(a, b):\n    return a - b\n```"
 
 
+def test_sample_budgets_validate_counts_and_keep_default_frontier_behavior():
+    from llmjury.engine import sample_counts
+    assert sample_counts(4) == (4, 4)
+    assert sample_counts(4, 1) == (4, 1)
+    for bad in (0, -1, True, False, 1.0, "4", None):
+        try:
+            sample_counts(bad)
+            assert False, "invalid local count must be rejected"
+        except ValueError:
+            pass
+    for bad in (0, -1, True, False, 1.0, "1"):
+        try:
+            sample_counts(4, bad)
+            assert False, "invalid frontier count must be rejected"
+        except ValueError:
+            pass
+
+
+def test_frontier_budget_reduces_generation_without_reducing_local_samples():
+    from llmjury.engine import Engine
+
+    class Verifier:
+        def verify(self, text):
+            return text == _GOOD
+
+    local = _FakeBackend({"best": [_BAD], "other": [_BAD]})
+    frontier = _FakeBackend({"top": [_GOOD]})
+    r = Engine(local, panel=["best", "other"], best="best", k=4, frontier_k=1,
+               frontier="top", frontier_backend=frontier).solve("add", Verifier())
+    assert r.verified and r.stage == "frontier"
+    assert [call[2] for call in local.calls] == [4, 4]
+    assert [call[2] for call in frontier.calls] == [1]
+
+
+def test_frontier_budget_reaches_individual_backend_submissions():
+    from llmjury.backends import Backend
+    from llmjury.engine import Engine
+
+    class RecordingBackend(Backend):
+        name = "codex"
+
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def _one(self, model, prompt, temperature, max_tokens):
+            self.calls.append(model)
+            return _GOOD
+
+    class Verifier:
+        def verify(self, text):
+            return text == _GOOD
+
+    backend = RecordingBackend()
+    r = Engine(backend, k=4, frontier_k=1, frontier="top", use_panel=False).solve("t", Verifier())
+    assert r.verified and backend.calls == ["top"]
+
+
+def test_smaller_frontier_budget_still_rejects_wrong_candidates():
+    from llmjury.engine import Engine
+    from llmjury.verifiers import FunctionalCodeVerifier
+
+    frontier = _FakeBackend({"top": [_BAD]})
+    r = Engine(frontier, k=4, frontier_k=1, frontier="top", use_panel=False).solve(
+        "add", FunctionalCodeVerifier(_TESTS, "add"))
+    assert not r.verified and r.stage == "unverified"
+    assert frontier.calls[0][2] == 1
+
+
+def test_cli_rejects_invalid_sample_budget_before_provider_creation():
+    from unittest.mock import patch
+    from llmjury import cli
+
+    for option in ("--k", "--frontier-k"):
+        with patch.object(sys, "argv", ["llmjury", "solve", "--task", "unused", option, "0"]), patch(
+            "llmjury.cli._backend",
+        ) as backend:
+            try:
+                cli.main()
+                assert False, "invalid sample count must stop argument parsing"
+            except SystemExit as error:
+                assert error.code == 2
+            backend.assert_not_called()
+
+
 def test_engine_single_when_best_solves():
     from llmjury.engine import Engine
     from llmjury.verifiers import FunctionalCodeVerifier
@@ -254,6 +339,7 @@ def test_ollama_backend_disables_thinking_by_default():
 
     body = json.loads(requests[0][0].data)
     assert body["think"] is False
+    assert body["keep_alive"] == "30s"
 
 
 def test_openrouter_timeout_is_reported_once_without_hidden_retries():
@@ -1001,7 +1087,7 @@ def test_validate_plan_rejects_malformed_steps():
 
 
 def test_install_codex_skill_is_idempotent_and_refuses_overwrite():
-    from llmjury.codex_integration import SKILL, install_codex_skill
+    from llmjury.codex_integration import SKILL, MANAGED_MARKER, install_codex_skill
 
     old_home = os.environ.get("CODEX_HOME")
     with tempfile.TemporaryDirectory() as codex_home:
@@ -1011,7 +1097,7 @@ def test_install_codex_skill_is_idempotent_and_refuses_overwrite():
             assert changed and path.read_text(encoding="utf-8") == SKILL
             same_path, changed = install_codex_skill()
             assert same_path == path and not changed
-            path.write_text(SKILL.replace("version: 2", "version: 1"), encoding="utf-8")
+            path.write_text(SKILL.replace(MANAGED_MARKER, "<!-- managed by llmjury install-codex; version: 1 -->"), encoding="utf-8")
             _, changed = install_codex_skill()
             assert changed and path.read_text(encoding="utf-8") == SKILL
             path.write_text("custom skill", encoding="utf-8")

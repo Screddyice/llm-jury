@@ -34,6 +34,16 @@ def reproduce_default_num_ctx():
     return DEFAULT_NUM_CTX
 
 
+def _positive_count(raw):
+    try:
+        count = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError("sample counts must be positive integers")
+    if count < 1:
+        raise argparse.ArgumentTypeError("sample counts must be positive integers")
+    return count
+
+
 def _backend(name, num_ctx=None, think=False):
     if name == "ollama":
         from .backends import OllamaBackend
@@ -303,7 +313,7 @@ def _cmd_solve(a):
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
                frontier=frontier, frontier_backend=fb, route=route,
                frontier_route=frontier_route,
-               use_panel=use_panel).solve(task, verifier)
+               use_panel=use_panel, frontier_k=getattr(a, "frontier_k", None)).solve(task, verifier)
 
     if a.json:
         import dataclasses
@@ -451,7 +461,10 @@ def main():
                    'function-call cases (entry_point(*args) == expected)')
     s.add_argument("--backend", default="openrouter",
                    choices=["openrouter", "ollama", "codex"])
-    s.add_argument("--k", type=int, default=4, help="samples per model (best-of-k)")
+    s.add_argument("--k", type=_positive_count, default=4, help="samples per local model (best-of-k)")
+    s.add_argument("--frontier-k", type=_positive_count,
+                   help="samples per frontier model (default: inherit --k). Use 1 to "
+                   "avoid parallel subscription generations while retaining local best-of-k")
     s.add_argument("--jobs", type=int, default=None,
                    help="concurrent generation threads across a stage "
                    "(default: k x panel size, capped at 16)")
