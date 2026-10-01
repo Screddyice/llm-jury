@@ -1089,7 +1089,7 @@ def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0),
     from llmjury import memguard
     saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
              memguard.simulator_stack, memguard.router_failover, memguard.host_memory,
-             memguard.prompt_cache_bytes, memguard.exclusive_compute)
+             memguard.prompt_cache_bytes, memguard.exclusive_compute, memguard.mem_fraction)
     loaded = loaded or {}
     memguard.disk_sizes = lambda host: {t: int(g * 1e9) for t, g in sizes_gb.items()}
     memguard.loaded_bytes = lambda host: (sum(loaded.values()), dict(loaded))
@@ -1099,11 +1099,12 @@ def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0),
     memguard.host_memory = lambda: (monkeypatched, 1)
     memguard.prompt_cache_bytes = lambda: 0
     memguard.exclusive_compute = lambda host=None: (False, "")
+    memguard.mem_fraction = lambda: memguard.DEFAULT_MEM_FRACTION
 
     def restore():
         (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
          memguard.simulator_stack, memguard.router_failover, memguard.host_memory,
-         memguard.prompt_cache_bytes, memguard.exclusive_compute) = saved
+         memguard.prompt_cache_bytes, memguard.exclusive_compute, memguard.mem_fraction) = saved
     return restore
 
 
@@ -1499,27 +1500,52 @@ def test_cli_blocks_openrouter_before_backend_creation_during_exclusive_compute(
         backend.assert_not_called()
 
 
-def test_cli_routes_frontier_directly_when_qwen_owns_compute():
+def test_cli_blocks_explicit_frontiers_when_qwen_owns_compute():
     from types import SimpleNamespace
     from unittest.mock import patch
     from llmjury.cli import cmd_solve
 
-    args = SimpleNamespace(
-        backend="ollama", frontier="auto", frontier_backend="openrouter",
-    )
-    with patch(
+    for backend_name in ("ollama", "codex", "openrouter"):
+        for frontier, provider in (("auto", "openrouter"), ("gpt-5.6-sol", "codex")):
+            args = SimpleNamespace(backend=backend_name, frontier=frontier,
+                                   frontier_backend=provider)
+            with patch("llmjury.cli._refuse_root"), patch(
+                "llmjury.memguard.exclusive_compute",
+                return_value=(True, "qwen owns qwen3.8:27b-obliterated"),
+            ), patch("llmjury.cli._backend") as backend, patch(
+                "llmjury.memguard.local_compute_lock",
+            ) as local_lock, patch("llmjury.cli._read") as read:
+                try:
+                    cmd_solve(args)
+                    assert False, "an explicit frontier must not bypass 27B ownership"
+                except SystemExit as error:
+                    assert "standing down" in str(error)
+                    assert "qwen owns" in str(error)
+                backend.assert_not_called()
+                local_lock.assert_not_called()
+                read.assert_not_called()
+
+
+def test_cli_rechecks_ownership_after_acquiring_the_local_lock():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from llmjury.cli import cmd_solve
+
+    args = SimpleNamespace(backend="ollama", frontier="gpt-5.6-sol",
+                           frontier_backend="codex")
+    with patch("llmjury.cli._refuse_root"), patch(
         "llmjury.memguard.exclusive_compute",
-        return_value=(True, "qwen owns qwen3.8:27b-obliterated"),
-    ), patch("llmjury.cli._cmd_solve") as solve, patch(
-        "llmjury.memguard.local_compute_lock",
-    ) as local_lock:
-        cmd_solve(args)
-        solve.assert_called_once_with(
-            args,
-            force_frontier=True,
-            exclusive_owner="qwen owns qwen3.8:27b-obliterated",
-        )
-        local_lock.assert_not_called()
+        side_effect=[(False, ""), (True, "new Qwen lease")],
+    ), patch("llmjury.memguard.local_compute_lock") as lock, patch(
+        "llmjury.cli._backend",
+    ) as backend:
+        try:
+            cmd_solve(args)
+            assert False, "ownership acquired between probes must stop generation"
+        except SystemExit as error:
+            assert "new Qwen lease" in str(error)
+        lock.assert_called_once()
+        backend.assert_not_called()
 
 
 # ── Frontier fallback when the panel cannot load ─────────────────────────────
@@ -1575,6 +1601,10 @@ def test_engine_runs_the_panel_by_default():
 
 
 if __name__ == "__main__":
+    # Pytest's conftest isolates the ledger. The standalone runner must do the
+    # same or fake Codex/Claude calls appear as real usage in cost reports.
+    ledger_directory = tempfile.TemporaryDirectory(prefix="llmjury-test-ledger-")
+    os.environ["LLMJURY_SPEND_LEDGER"] = str(Path(ledger_directory.name) / "spend.jsonl")
     tests = sorted((k, v) for k, v in globals().items()
                    if k.startswith("test_") and callable(v))
     failed = 0

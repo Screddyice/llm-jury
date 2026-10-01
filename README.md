@@ -3,7 +3,6 @@
 [![PyPI](https://img.shields.io/pypi/v/llm-jury-verify)](https://pypi.org/project/llm-jury-verify/)
 [![Python](https://img.shields.io/pypi/pyversions/llm-jury-verify)](https://pypi.org/project/llm-jury-verify/)
 [![CI](https://img.shields.io/github/actions/workflow/status/ajsai47/llm-jury/ci.yml?label=ci)](https://github.com/ajsai47/llm-jury/actions)
-[![dependencies](https://img.shields.io/badge/dependencies-0-success)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [Quickstart](#quickstart) · [Claude ↔ Codex](#bidirectional-claude--codex-orchestration) · [Codex Fusion](#codex-fusion) · [How it works](#how-it-works) · [Benchmarks](#benchmarks) · [Write-up →](https://app.notion.com/p/3844834c4d7881d1adaeed9c3a81dcbb) · [Paper →](https://app.notion.com/p/3874834c4d78817f99a0fc26088ed7e4)
@@ -35,10 +34,11 @@ accuracy as parity-or-better; the **cost gap is the decisive, measured win.**)*
 
 And the local council **alone**, no cloud at all, already beats a frontier model's one-shot on hard
 code — **75.6% vs 62.2%** on LiveCodeBench — and matches it on HumanEval+ (**97.6% vs 97.6%**).
-Free, private, zero dependencies (stdlib only).
+Local inference uses your own hardware without per-call API charges. The Python package
+includes pytest for verification.
 
 ```bash
-pip install llm-jury-verify   # zero dependencies, stdlib only
+pip install llm-jury-verify
 llmjury demo                 # 5-second offline demo — no API key, nothing to download
 ```
 
@@ -463,13 +463,15 @@ Ollama's `/api/ps` output as a residency backstop.
 ```
 error: llm-jury is standing down; exclusive 27B compute is active.
 owner: qwen owns qwen3.8:27b-obliterated
-hint: add --frontier auto to skip the local council and use the remote verifier ladder.
+The local council and every frontier provider, including OpenRouter, remain disabled until the 27B route releases the host.
 ```
 
-Without `--frontier`, this gate runs before backend construction and keeps the run local
-and fail-closed. With `--frontier auto`, LLM-Jury skips local backend use and routes straight
-to the remote, verifier-gated ladder. That path does not load Ollama models or compete for
-the local lock. The lease closes the gap before Ollama reports the model as resident. An
+This gate stops local and remote jury generation before backend construction or local-lock
+acquisition, including runs with an explicit Codex or OpenRouter frontier. LLM-Jury rechecks
+ownership after acquiring the local lock. Wait until the 27B session releases its lease and
+Ollama no longer reports the model resident before rerunning the jury. Ordinary memory
+pressure can still skip local inference and use an explicitly configured remote frontier.
+The lease closes the gap before Ollama reports the model as resident. An
 expired lease or one from a dead router process is ignored. Missing or unreadable state
 fails open. Point the probes elsewhere with `LLMJURY_ROUTER_STATE` and
 `LLMJURY_COMPUTE_LEASE_DIR` when testing an isolated router.
@@ -620,10 +622,11 @@ Both matter: Ollama sizes KV as `num_ctx x OLLAMA_NUM_PARALLEL` **at load**, so 
 server default of 32k inflates every panelist by 1.6-1.9x, and a benchmark sweep is the most
 likely way to hold the whole council resident at once.
 
-Measured on a 36 GiB Mac with the shipped local panel at `OLLAMA_NUM_PARALLEL=2`:
+Historical measurement on a 36 GiB Mac with the former three-model panel at
+`OLLAMA_NUM_PARALLEL=2`:
 
 ```
-llmjury reproduce lcb --backend ollama       # gemma3:12b + llama3.1:8b
+llmjury reproduce lcb --backend ollama       # former Gemma/Llama/Phi-mini panel
   single best model + verified best-of-4:   19/25 = 76.0%
   + diverse council (escalation):            +0  ->  19/25 = 76.0%
 ```
@@ -633,6 +636,9 @@ so 76.0% here and the published 75.6% are not the same measurement. And on this 
 council added **nothing** over the best model alone: every pass came from `gemma3:12b` at the
 `single` stage. Council escalation earns its keep on harder distributions than the bundled
 slice — treat `+0` as a property of this sample, not a refutation of the method.
+
+The current local panel contains Gemma and Llama. The historical result above does not
+measure that pair. Check current memory admission before attempting a new benchmark.
 
 ## Status
 
@@ -718,6 +724,16 @@ Verification: `python tests/test_llmjury.py` and
 `python tests/test_memory_pressure.py` run without model inference. Existing
 panel-fit measurements above exclude the extra prompt-cache reserve; use the
 current preflight before starting a council on a busy desktop.
+
+Run the full offline suite with `python -m pytest -q`. Synthetic panel tests use the
+package's default memory fraction, so a desktop's `LLMJURY_MEM_FRACTION` override cannot
+change their expected admission results. Both pytest and the standalone test runner keep
+mock provider calls out of the real `~/.llmjury/spend.jsonl` ledger.
+
+The spend ledger records successful metered calls and subscription generations. It does
+not record local Ollama generations, cache hits, verifier verdicts, or skipped reviews.
+Use a fresh task plus its result JSON to prove a live accepted candidate; provider-call
+counts alone cannot establish local success rates or usage savings.
 
 ## Working in this repo
 
