@@ -49,6 +49,20 @@ class MemoryAdmissionTests(unittest.TestCase):
     def test_allows_small_work_with_headroom(self):
         self.assertTrue(self.check().ok)
 
+    def test_preserves_four_gib_for_desktop_growth(self):
+        # This model needs about 5.7 GiB including its cache. The former
+        # 2 GiB reserve admitted it with 8 GiB free and left too little margin.
+        self.assertFalse(self.check(available=8).ok)
+        self.assertTrue(self.check(available=10).ok)
+
+    def test_explicit_mac_fraction_cannot_bypass_the_ceiling(self):
+        with patch.object(memguard.platform, "system", return_value="Darwin"), patch.object(
+            memguard, "host_memory", return_value=(36 * memguard.GB, 1),
+        ), patch.dict(os.environ, {"LLMJURY_PROMPT_CACHE_MIB": "1024"}):
+            report = memguard.check(["small"], parallel=1, fraction=0.91)
+            self.assertTrue(report.ok)
+            self.assertEqual(report.budget, int(36 * memguard.GB * 0.65))
+
     def test_unknown_host_pressure_refuses_local_admission(self):
         with patch.object(memguard, "host_memory", return_value=(None, None), create=True):
             self.assertFalse(memguard.check(["small"], parallel=1).ok)
@@ -74,6 +88,16 @@ class MemoryAdmissionTests(unittest.TestCase):
 
 
 class HostProbeTests(unittest.TestCase):
+    def test_mac_ceiling_rejects_optimistic_session_overrides(self):
+        with patch.object(memguard.platform, "system", return_value="Darwin"):
+            for supplied, expected in (("0.91", 0.65), ("0.65", 0.65), ("0.5", 0.5)):
+                with self.subTest(supplied=supplied), patch.dict(os.environ, {"LLMJURY_MEM_FRACTION": supplied}):
+                    self.assertEqual(memguard.mem_fraction(), expected)
+
+    def test_other_hosts_keep_their_configured_fraction(self):
+        with patch.object(memguard.platform, "system", return_value="Linux"), patch.dict(os.environ, {"LLMJURY_MEM_FRACTION": "0.91"}):
+            self.assertEqual(memguard.mem_fraction(), 0.91)
+
     def test_missing_or_invalid_residency_is_not_an_empty_server(self):
         for payload in ({}, {"models": None}, {"models": [{"name": "other", "size": -1}]}, {"models": ["invalid"]}):
             with self.subTest(payload=payload), patch.object(memguard, "_get_json", return_value=payload):

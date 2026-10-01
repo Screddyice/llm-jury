@@ -685,7 +685,11 @@ the logs showed 7.3 GiB of saved prompts. One cache update took 51 seconds.
 The preflight now reserves that cache bound per loaded/requested runner, refuses
 unreadable memory probes, and checks current desktop headroom as well as the
 static model budget. macOS warning/critical pressure blocks local work. On Linux
-the guard uses `MemAvailable`. It preserves 2 GiB beyond current desktop needs.
+the guard uses `MemAvailable`. It preserves 4 GiB beyond current desktop needs.
+On Macs, both environment and explicit fraction overrides cap at 0.65; lower limits
+still apply. This prevents an older session's 0.91 override from raising the model
+budget past 23.4 GiB on a 36 GiB host. Headroom, pressure, prompt-cache reserves, and
+exclusive ownership still constrain admission below that ceiling.
 An unknown or unlimited cache bound also refuses local admission.
 
 On macOS, headroom comes from `vm_stat` free and inactive pages, using the

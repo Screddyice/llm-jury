@@ -68,6 +68,7 @@ SERVER_DEFAULT_CTX = 32768
 # approve a council that Ollama then evicts a member of, which serialises the
 # panel rather than crashing the host, but quietly.
 DEFAULT_MEM_FRACTION = 0.65
+DESKTOP_RESERVE_BYTES = 4 * GB
 
 # Set to any non-empty value except "0" to permit a local panel while an iOS
 # Simulator is booted. The default is refusal: a booted simulator was measured at
@@ -111,7 +112,10 @@ def _env_float(name, default):
 
 
 def mem_fraction():
-    return _env_float("LLMJURY_MEM_FRACTION", DEFAULT_MEM_FRACTION)
+    fraction = _env_float("LLMJURY_MEM_FRACTION", DEFAULT_MEM_FRACTION)
+    # Older GUI sessions can retain an optimistic environment override. On
+    # unified-memory Macs, keep the ceiling aligned with the server budget.
+    return min(fraction, DEFAULT_MEM_FRACTION) if platform.system() == "Darwin" else fraction
 
 
 def prompt_cache_bytes():
@@ -524,7 +528,10 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
     slots = num_parallel() if parallel is None else parallel
     ctx = int(num_ctx) if int(num_ctx or 0) > 0 else SERVER_DEFAULT_CTX
     cells = ctx * max(int(slots), 1)
-    budget = int(total * (mem_fraction() if fraction is None else fraction))
+    effective_fraction = mem_fraction() if fraction is None else fraction
+    if platform.system() == "Darwin":
+        effective_fraction = min(effective_fraction, DEFAULT_MEM_FRACTION)
+    budget = int(total * effective_fraction)
 
     resident_total, resident_by_model = loaded_bytes(host)
     if resident_total is None:
@@ -559,9 +566,10 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
     runner_names.update(name.removesuffix(":latest") for name in seen)
     need += cache * len(runner_names)
     projected = resident_total + need
-    # Keep 2 GiB beyond the current desktop's needs. The static fraction still
+    # Keep 4 GiB beyond the current desktop's needs, matching the Qwen wrapper.
+    # The static fraction still
     # caps model residency; this second ceiling adapts as other apps grow.
-    headroom = max(0, available - 2 * GB)
+    headroom = max(0, available - DESKTOP_RESERVE_BYTES)
     if unknown:
         return Report(False, unknown=unknown,
                       pressure_reason="model costs unknown: " + ", ".join(unknown))
