@@ -313,7 +313,8 @@ def _cmd_solve(a):
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
                frontier=frontier, frontier_backend=fb, route=route,
                frontier_route=frontier_route,
-               use_panel=use_panel, frontier_k=getattr(a, "frontier_k", None)).solve(task, verifier)
+               use_panel=use_panel, frontier_k=getattr(a, "frontier_k", None),
+               frontier_defaults={"codex": 1}).solve(task, verifier)
 
     if a.json:
         import dataclasses
@@ -552,8 +553,6 @@ def main():
     c.set_defaults(func=cmd_install_codex)
 
     a = p.parse_args()
-    if a.cmd == "solve" and a.frontier_k is None and a.frontier_backend == "codex":
-        a.frontier_k = 1
     a.func(a)
 
 

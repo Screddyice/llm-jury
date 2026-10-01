@@ -175,6 +175,23 @@ def test_sample_budgets_validate_counts_and_keep_default_frontier_behavior():
             pass
 
 
+def test_frontier_sample_count_validates_selected_defaults_and_explicit_overrides():
+    from llmjury.engine import frontier_sample_count
+
+    assert frontier_sample_count(4, backend_name="codex", defaults={"codex": 1}) == 1
+    assert frontier_sample_count(4, backend_name="openrouter", defaults={"codex": 1}) == 4
+    assert frontier_sample_count(4, 3, "codex", {"codex": 0}) == 3
+    assert frontier_sample_count(4, backend_name="openrouter", defaults={"codex": 0}) == 4
+    for bad in (0, -1, True, False, 1.0, "4", None):
+        for args in ((bad, 1, "codex", {"codex": 1}), (4, None, "codex", {"codex": bad})):
+            try:
+                frontier_sample_count(*args)
+            except ValueError:
+                pass
+            else:
+                assert False, "invalid selected count must be rejected"
+
+
 def test_frontier_budget_reduces_generation_without_reducing_local_samples():
     from llmjury.engine import Engine
 
@@ -242,18 +259,88 @@ def test_cli_rejects_invalid_sample_budget_before_provider_creation():
             backend.assert_not_called()
 
 
-def test_cli_codex_frontier_defaults_to_one_and_honors_explicit_budgets():
+def test_cli_keeps_explicit_frontier_budget_separate_from_provider_defaults():
     from unittest.mock import patch
     from llmjury import cli
 
     for provider, extra, expected in (
-        ("codex", [], 1), ("openrouter", [], None), ("codex", ["--frontier-k", "3"], 3),
+        ("codex", [], None), ("openrouter", [], None), ("codex", ["--frontier-k", "3"], 3),
     ):
         argv = ["llmjury", "solve", "--task", "unused", "--frontier-backend", provider] + extra
         with patch.object(sys, "argv", argv), patch.object(cli, "cmd_solve") as solve:
             cli.main()
             assert solve.call_args.args[0].frontier_k == expected
             assert solve.call_args.args[0].k == 4
+
+
+def test_frontier_defaults_follow_the_actual_provider_and_preserve_python_defaults():
+    from llmjury.engine import Engine
+
+    class Verifier:
+        def verify(self, text):
+            return text == _GOOD
+
+    for explicit, defaults, counts in (
+        (None, {"codex": 1}, [4, 1]),
+        (3, {"codex": 1}, [3, 3]),
+        (None, None, [4, 4]),
+    ):
+        codex = _FakeBackend({"gpt": [_GOOD]})
+        codex.name = "codex"
+        openrouter = _FakeBackend({"flash": [_BAD]})
+        openrouter.name = "openrouter"
+        result = Engine(
+            codex, k=4, frontier_k=explicit, frontier_defaults=defaults,
+            frontier=["flash", "gpt"], frontier_backend=codex,
+            frontier_route={"flash": openrouter}, use_panel=False,
+        ).solve("add", Verifier())
+        assert result.verified and result.model == "gpt"
+        assert [openrouter.calls[0][2], codex.calls[0][2]] == counts
+
+
+def test_cli_codex_frontier_and_mixed_ladder_rescue_use_one_candidate():
+    from unittest.mock import patch
+    from llmjury import cli
+
+    for provider, mixed, explicit, expected in (
+        ("codex", False, [], [1]),
+        ("openrouter", False, [], [4]),
+        ("openrouter", True, [], [4, 1]),
+        ("openrouter", True, ["--frontier-k", "3"], [3, 3]),
+    ):
+        local = _FakeBackend({"local": [_BAD]})
+        local.name = "openrouter"
+        remote = _FakeBackend({"flash": [_BAD if mixed else _GOOD]})
+        remote.name = "openrouter"
+        codex = _FakeBackend({"gpt": [_GOOD]})
+        codex.name = "codex"
+        backends = {"openrouter": remote, "codex": codex}
+        calls = []
+
+        def backend(name, **kwargs):
+            calls.append(name)
+            return local if len(calls) == 1 else backends[name]
+
+        frontier = "auto" if mixed else "gpt" if provider == "codex" else "flash"
+        argv = ["llmjury", "solve", "--task", "task", "--cases", "cases",
+                "--entry-point", "add", "--backend", "openrouter", "--models", "local",
+                "--frontier", frontier, "--frontier-backend", provider, "--json"] + explicit
+        with patch.object(sys, "argv", argv), patch.object(
+            cli, "_require_compute_available",
+        ), patch.object(cli, "_backend", side_effect=backend), patch.object(
+            cli, "_read", side_effect=lambda path: '[{"args": [2, 3], "expected": 5}]'
+            if path == "cases" else "implement add",
+        ), patch.object(cli, "_frontier_models", return_value=["flash"] if mixed else frontier), patch.object(
+            cli, "_claude_frontier_rescue", return_value=None,
+        ), patch.object(cli, "_codex_frontier_rescue", return_value="gpt" if mixed else None), patch.object(
+            cli.os, "_exit",
+        ) as exit_process:
+            cli.main()
+            exit_process.assert_called_once_with(0)
+        observed = ([remote.calls[0][2]] if remote.calls else []) + (
+            [codex.calls[0][2]] if codex.calls else [])
+        assert observed == expected
+        assert local.calls[0][2] == 4
 
 
 def test_engine_single_when_best_solves():
