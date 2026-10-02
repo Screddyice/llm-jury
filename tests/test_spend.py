@@ -15,6 +15,46 @@ from pathlib import Path  # noqa: E402
 from llmjury import spend  # noqa: E402
 
 
+def test_local_receipt_uses_native_counts_and_never_saves_content(tmp_path, monkeypatch):
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+    spend.record_local("gemma3:12b", {"done": True, "prompt_eval_count": 100,
+                                    "eval_count": 20, "message": {"content": "private"}})
+    row = json.loads(ledger.read_text())
+    assert row["backend"] == "ollama"
+    assert row["prompt_tokens"] == 100
+    assert row["completion_tokens"] == 20
+    assert row["cost_usd"] == 0
+    assert "private" not in ledger.read_text()
+
+
+def test_local_missing_invalid_or_unfinished_usage_is_not_a_free_call(tmp_path, monkeypatch):
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+    for response in ({}, {"done": True, "eval_count": 10},
+                     {"done": False, "prompt_eval_count": 10, "eval_count": 2},
+                     {"done": True, "prompt_eval_count": -1, "eval_count": 2},
+                     {"done": True, "prompt_eval_count": True, "eval_count": 2}):
+        spend.record_local("local", response)
+    assert not ledger.exists()
+
+
+def test_ollama_backend_records_usage_before_returning_a_candidate(tmp_path, monkeypatch):
+    import io
+    from llmjury import backends
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+    class Response(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+    payload = {"done": True, "prompt_eval_count": 42, "eval_count": 7,
+               "message": {"content": "candidate"}}
+    monkeypatch.setattr(backends.urllib.request, "urlopen",
+                        lambda *args, **kwargs: Response(json.dumps(payload).encode()))
+    assert backends.OllamaBackend()._one("local", "prompt", 0.7, 100) == "candidate"
+    assert json.loads(ledger.read_text())["completion_tokens"] == 7
+
+
 def test_record_appends_one_line_per_call(tmp_path, monkeypatch):
     ledger = tmp_path / "spend.jsonl"
     monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
@@ -32,6 +72,7 @@ def test_record_appends_one_line_per_call(tmp_path, monkeypatch):
     assert first["prompt_tokens"] == 100
     assert first["completion_tokens"] == 20
     assert first["cost_usd"] == 0.0025
+    assert first["cost_available"] is True
     assert first["ts"].endswith("+00:00")
 
 
@@ -64,6 +105,15 @@ def test_record_defaults_cost_to_zero_when_the_provider_omits_it(tmp_path, monke
     rec = json.loads(ledger.read_text().splitlines()[0])
     assert rec["cost_usd"] == 0.0
     assert rec["prompt_tokens"] == 7
+    assert rec["cost_available"] is False
+
+
+def test_record_preserves_provider_cached_tokens(tmp_path, monkeypatch):
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+    spend.record("openrouter", "model", {"prompt_tokens": 100, "completion_tokens": 5,
+                "cost": 0.01, "prompt_tokens_details": {"cached_tokens": 80}})
+    assert json.loads(ledger.read_text())["cached_tokens"] == 80
 
 
 def test_openrouter_backend_records_the_call_it_was_billed_for(tmp_path, monkeypatch):
