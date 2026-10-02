@@ -113,3 +113,19 @@ def record_subscription(backend, model, prompt="", completion=""):
             fh.write(json.dumps(row) + "\n")
     except Exception:
         pass
+
+
+def record_local(model, response):
+    """Record native Ollama counts without inventing usage for empty responses."""
+    try:
+        prompt_tokens = response["prompt_eval_count"]
+        completion_tokens = response["eval_count"]
+        if any(type(value) is not int or value < 0
+               for value in (prompt_tokens, completion_tokens)):
+            return
+        if not response.get("done"):
+            return
+        record("ollama", model, {"prompt_tokens": prompt_tokens,
+                                 "completion_tokens": completion_tokens, "cost": 0.0})
+    except (KeyError, TypeError):
+        return

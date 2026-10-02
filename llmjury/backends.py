@@ -398,6 +398,7 @@ class OllamaBackend(Backend):
                 if isinstance(d, dict) and d.get("error"):
                     sys.stderr.write(f"[llmjury] ollama {model}: {d['error']}\n")
                     return ""
+                spend.record_local(model, d)
                 return d.get("message", {}).get("content", "") or ""
             except urllib.error.HTTPError as e:
                 sys.stderr.write(

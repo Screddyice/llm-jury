@@ -520,6 +520,14 @@ stronger panel through `--models`.
 
 ### Spend ledger
 
+Completed local Ollama council calls also append native `prompt_eval_count` and
+`eval_count` token counts to this ledger with `backend: "ollama"` and
+`cost_usd: 0.0`. The ledger contains no prompt or candidate text. Missing or
+unfinished usage is not recorded as a zero-cost call. Cache hits do not issue a
+provider request and do not append a second receipt. This enables the weekly
+Codex-only token-volume comparison; older local calls have no recoverable token
+receipt and remain excluded. Hardware and electricity costs are separate.
+
 Every metered OpenRouter call appends one line to `~/.llmjury/spend.jsonl`
 (override with `LLMJURY_SPEND_LEDGER`):
 
