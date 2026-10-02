@@ -527,6 +527,9 @@ unfinished usage is not recorded as a zero-cost call. Cache hits do not issue a
 provider request and do not append a second receipt. This enables the weekly
 Codex-only token-volume comparison; older local calls have no recoverable token
 receipt and remain excluded. Hardware and electricity costs are separate.
+Metered receipts retain native cached-token counts when supplied and mark
+missing provider cost as unavailable, so a consumer cannot confuse it with free
+inference.
 
 Every metered OpenRouter call appends one line to `~/.llmjury/spend.jsonl`
 (override with `LLMJURY_SPEND_LEDGER`):

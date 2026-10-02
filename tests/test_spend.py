@@ -72,6 +72,7 @@ def test_record_appends_one_line_per_call(tmp_path, monkeypatch):
     assert first["prompt_tokens"] == 100
     assert first["completion_tokens"] == 20
     assert first["cost_usd"] == 0.0025
+    assert first["cost_available"] is True
     assert first["ts"].endswith("+00:00")
 
 
@@ -104,6 +105,15 @@ def test_record_defaults_cost_to_zero_when_the_provider_omits_it(tmp_path, monke
     rec = json.loads(ledger.read_text().splitlines()[0])
     assert rec["cost_usd"] == 0.0
     assert rec["prompt_tokens"] == 7
+    assert rec["cost_available"] is False
+
+
+def test_record_preserves_provider_cached_tokens(tmp_path, monkeypatch):
+    ledger = tmp_path / "spend.jsonl"
+    monkeypatch.setenv("LLMJURY_SPEND_LEDGER", str(ledger))
+    spend.record("openrouter", "model", {"prompt_tokens": 100, "completion_tokens": 5,
+                "cost": 0.01, "prompt_tokens_details": {"cached_tokens": 80}})
+    assert json.loads(ledger.read_text())["cached_tokens"] == 80
 
 
 def test_openrouter_backend_records_the_call_it_was_billed_for(tmp_path, monkeypatch):

@@ -65,6 +65,8 @@ def record(backend, model, usage):
             "prompt_tokens": int(usage.get("prompt_tokens") or 0),
             "completion_tokens": int(usage.get("completion_tokens") or 0),
             "cost_usd": float(usage.get("cost") or 0.0),
+            "cost_available": usage.get("cost") is not None,
+            "cached_tokens": int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0),
         }
         # O_APPEND with one write per line keeps concurrent council members from
         # interleaving inside a record.
