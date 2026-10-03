@@ -1427,6 +1427,40 @@ def test_memguard_counts_a_repeated_tag_once():
         restore()
 
 
+def test_cli_selects_a_safe_local_subset_after_panel_overcommit():
+    from types import SimpleNamespace
+    from llmjury.cli import _safe_local_panel
+
+    reports = {
+        ("best", "other"): SimpleNamespace(ok=False, terminal=False,
+                                             simulator=False, pressure_reason=""),
+        ("best",): SimpleNamespace(ok=True, terminal=False,
+                                    simulator=False, pressure_reason=""),
+    }
+
+    def memory_check(models, **kwargs):
+        return reports[tuple(models)]
+
+    selected, report = _safe_local_panel(
+        ["best", "other"], "best", memory_check, "http://localhost:11434", 8192)
+    assert selected == ["best"]
+    assert report.ok
+
+
+def test_cli_keeps_ram_pressure_refusal_fail_closed():
+    from types import SimpleNamespace
+    from llmjury.cli import _safe_local_panel
+
+    refusal = SimpleNamespace(ok=False, terminal=False, simulator=False,
+                              pressure_reason="host memory pressure is elevated")
+
+    selected, report = _safe_local_panel(
+        ["best", "other"], "best", lambda *args, **kwargs: refusal,
+        "http://localhost:11434", 8192)
+    assert selected is None
+    assert report is refusal
+
+
 def test_memguard_refuses_when_it_cannot_determine_memory_cost():
     """Unknown host/model costs must not admit new local allocations."""
     from llmjury import memguard
