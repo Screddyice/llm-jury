@@ -273,6 +273,9 @@ The Mac LaunchAgent `com.screddy.llmjury-monthly-refresh` runs this same-family 
 the first day of each month at 09:00 local time. It runs `ollama pull` for the configured
 tags, admits the largest safe panel, and runs a local-only verifier smoke test. It writes
 only local status to `~/.llmjury/monthly-refresh.json`; it has no OpenRouter or email path.
+The LaunchAgent pins two Ollama decode slots and a 1 GiB prompt-cache reserve, while each
+report records RAM availability, memory pressure, model residency inputs, and simulator
+co-residency so hardware refusals remain explainable.
 
 `--frontier-k 1` sends one generation to each frontier tier while retaining local
 best-of-4 sampling. Codex CLI frontiers default to one candidate even without this

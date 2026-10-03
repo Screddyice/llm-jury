@@ -37,3 +37,20 @@ def test_refresh_stops_subset_probing_under_host_pressure(monkeypatch):
     assert selected == []
     assert calls == [["best", "other"]]
     assert "pressure" in result["reason"]
+
+
+def test_scheduled_subprocesses_use_conservative_hardware_defaults(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(kwargs["env"])
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(REFRESH.subprocess, "run", fake_run)
+    monkeypatch.delenv("LLMJURY_OLLAMA_PARALLEL", raising=False)
+    monkeypatch.delenv("LLMJURY_PROMPT_CACHE_MIB", raising=False)
+
+    REFRESH.run(["ollama", "list"], 1)
+
+    assert captured["LLMJURY_OLLAMA_PARALLEL"] == "2"
+    assert captured["LLMJURY_PROMPT_CACHE_MIB"] == "1024"

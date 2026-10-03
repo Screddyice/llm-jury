@@ -13,6 +13,8 @@
   <dict>
     <key>HOME</key><string>/Users/screddy</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/Users/screddy/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LLMJURY_OLLAMA_PARALLEL</key><string>2</string>
+    <key>LLMJURY_PROMPT_CACHE_MIB</key><string>1024</string>
   </dict>
   <key>RunAtLoad</key>
   <false/>

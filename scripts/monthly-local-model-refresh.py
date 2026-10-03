@@ -17,16 +17,39 @@ HOME = Path.home()
 LOCK_PATH = HOME / ".llmjury/monthly-refresh.lock"
 REPORT_PATH = HOME / ".llmjury/monthly-refresh.json"
 NUM_CTX = 8192
+SCHEDULED_ENV = {
+    "LLMJURY_OLLAMA_PARALLEL": "2",
+    "LLMJURY_PROMPT_CACHE_MIB": "1024",
+}
 
 
 def run(command, timeout):
     environment = os.environ.copy()
     environment.pop("OPENROUTER_API_KEY", None)
+    for name, value in SCHEDULED_ENV.items():
+        environment.setdefault(name, value)
     existing_pythonpath = environment.get("PYTHONPATH", "")
     environment["PYTHONPATH"] = str(REPOSITORY) + (
         os.pathsep + existing_pythonpath if existing_pythonpath else "")
     return subprocess.run(command, capture_output=True, text=True,
                           timeout=timeout, env=environment)
+
+
+def hardware_snapshot():
+    from llmjury import memguard
+
+    available, pressure = memguard.host_memory()
+    simulator, simulator_rss = memguard.simulator_stack()
+    return {
+        "ram_bytes": memguard.total_ram_bytes(),
+        "available_bytes": available,
+        "pressure_level": pressure,
+        "ollama_parallel": memguard.num_parallel(),
+        "prompt_cache_bytes": memguard.prompt_cache_bytes(),
+        "memory_fraction": memguard.mem_fraction(),
+        "simulator_running": simulator,
+        "simulator_rss_bytes": simulator_rss,
+    }
 
 
 def installed_models(ollama):
@@ -109,6 +132,7 @@ def main():
         report = {
             "at": datetime.now(timezone.utc).isoformat(),
             "configured_panel": LOCAL_PANEL,
+            "hardware": hardware_snapshot(),
             "pulls": pulls,
             "admitted_panel": admitted,
             "preflight": admission,
