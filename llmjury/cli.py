@@ -4,6 +4,7 @@ import sys
 import json
 import argparse
 import shutil
+from itertools import combinations
 from pathlib import Path
 
 from . import __version__
@@ -82,6 +83,21 @@ def _frontier_models(value, backend_name):
 def _frontier_label(frontier):
     """Render either one explicit model or an ordered model ladder."""
     return " -> ".join([frontier] if isinstance(frontier, str) else frontier)
+
+
+def _safe_local_panel(models, best, memory_check, host, num_ctx):
+    """Choose the largest safe local subset after a full-panel refusal."""
+    ordered = list(dict.fromkeys(models))
+    for size in range(len(ordered), 0, -1):
+        for candidate in combinations(ordered, size):
+            if best and best not in candidate:
+                continue
+            report = memory_check(candidate, host=host, num_ctx=num_ctx)
+            if report.ok:
+                return list(candidate), report
+            if report.terminal or report.simulator or report.pressure_reason:
+                return None, report
+    return None, None
 
 
 def _codex_frontier_rescue(value, backend_name):
@@ -272,7 +288,19 @@ def _cmd_solve(a):
             report = memory_check(probe, host=backend.host, num_ctx=a.num_ctx)
             if not report.ok:
                 sys.stderr.write("[llmjury] " + report.message() + "\n")
-                if a.mem_check == "refuse":
+                local_models = [model for model in (panel or []) if model not in route]
+                local_best = best if best in local_models else (local_models[0] if local_models else None)
+                selected, selected_report = _safe_local_panel(
+                    local_models, local_best, memory_check, backend.host, a.num_ctx)
+                if selected:
+                    routed = [model for model in (panel or []) if model in route]
+                    panel = selected + routed
+                    best = selected[0] if best not in panel else best
+                    sys.stderr.write(
+                        "[llmjury] full local panel refused; using admitted local subset: "
+                        + ", ".join(selected) + "\n")
+                    report = selected_report
+                if not selected and a.mem_check == "refuse":
                     # A refusal usually says the PANEL cannot load here and nothing
                     # more, leaving the frontier ladder — remote, costing this host
                     # no memory — perfectly usable. Drop the panel and escalate
@@ -303,7 +331,7 @@ def _cmd_solve(a):
                             "or: add --frontier auto to escalate to the cloud ladder, which "
                             "needs no local memory\n"
                             "override: --mem-check warn (proceed anyway) or off (skip the check)")
-                else:
+                elif not selected:
                     sys.stderr.write(f"[llmjury] proceeding anyway: {report.hint()}\n")
         for warning in baked_system_warnings(
                 probe, lambda m: show_system_chars(backend.host, m)):

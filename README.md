@@ -263,6 +263,12 @@ repository rules and user configuration, and disables shell tools. Pin any expli
 OpenRouter slug with `--frontier <provider/model>` when reproducing a benchmark or comparing
 a particular model.
 
+When the full local panel does not fit the current memory budget, LLM-Jury tries the
+largest admitted subset of the requested local models before using the frontier. Elevated
+host pressure, router ownership, and simulator co-residency remain hard refusals; the
+selector never overrides those guards. This keeps a local model in the path when the host
+can safely load one, while preserving the verifier gate for every candidate.
+
 `--frontier-k 1` sends one generation to each frontier tier while retaining local
 best-of-4 sampling. Codex CLI frontiers default to one candidate even without this
 option, including Codex rescues in mixed-provider ladders. The budget follows the
