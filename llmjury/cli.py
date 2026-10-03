@@ -295,7 +295,7 @@ def _cmd_solve(a):
                 if selected:
                     routed = [model for model in (panel or []) if model in route]
                     panel = selected + routed
-                    best = selected[0] if best not in selected else best
+                    best = selected[0] if best not in panel else best
                     sys.stderr.write(
                         "[llmjury] full local panel refused; using admitted local subset: "
                         + ", ".join(selected) + "\n")
