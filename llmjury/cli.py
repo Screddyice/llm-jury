@@ -92,6 +92,8 @@ def _safe_local_panel(models, best, memory_check, host, num_ctx):
     configured panel member may be the only one that fits the current host.
     """
     ordered = list(dict.fromkeys(models))
+    if best in ordered:
+        ordered = [best] + [model for model in ordered if model != best]
     for size in range(len(ordered), 0, -1):
         for candidate in combinations(ordered, size):
             report = memory_check(candidate, host=host, num_ctx=num_ctx)
