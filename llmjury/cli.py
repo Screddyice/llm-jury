@@ -4,6 +4,7 @@ import sys
 import json
 import argparse
 import shutil
+import platform
 from itertools import combinations
 from pathlib import Path
 
@@ -86,12 +87,16 @@ def _frontier_label(frontier):
 
 
 def _safe_local_panel(models, best, memory_check, host, num_ctx):
-    """Choose the largest safe local subset after a full-panel refusal."""
+    """Choose the largest safe local subset after a full-panel refusal.
+
+    The preferred model is tried first, but it is not mandatory: a smaller
+    configured panel member may be the only one that fits the current host.
+    """
     ordered = list(dict.fromkeys(models))
+    if best in ordered:
+        ordered = [best] + [model for model in ordered if model != best]
     for size in range(len(ordered), 0, -1):
         for candidate in combinations(ordered, size):
-            if best and best not in candidate:
-                continue
             report = memory_check(candidate, host=host, num_ctx=num_ctx)
             if report.ok:
                 return list(candidate), report
@@ -176,7 +181,12 @@ def _require_compute_available():
             f"owner: {owner}\n"
             "The local council and every frontier provider, including OpenRouter, "
             "remain disabled until the 27B route releases the host."
-        )
+)
+
+# macOS and Ollama already own memory pressure and model residency. The former
+# byte-budget preflight remains available as an explicit diagnostic/opt-in, but
+# it must not block the normal local path on unified-memory Macs.
+DEFAULT_MEM_CHECK = "off" if platform.system() == "Darwin" else "refuse"
 
 
 def cmd_solve(a):
@@ -502,11 +512,9 @@ def main():
                    "0 = the server's default). Ollama sizes each model's KV cache as "
                    "num_ctx x OLLAMA_NUM_PARALLEL at load, so a lean value here is what "
                    "lets the whole council decode in parallel without evictions")
-    s.add_argument("--mem-check", choices=["refuse", "warn", "off"], default="refuse",
-                   help="preflight the local panel against physical RAM, --backend ollama "
-                   "only (default refuse). A panel that does not fit does not fail "
-                   "cleanly: it over-commits unified memory and can panic the host. "
-                   "Tune the ceiling with LLMJURY_MEM_FRACTION (default 0.70)")
+    s.add_argument("--mem-check", choices=["refuse", "warn", "off"], default=DEFAULT_MEM_CHECK,
+                   help="optional custom RAM preflight for --backend ollama (default off on macOS; "
+                   "refuse elsewhere). macOS and Ollama remain the memory authority")
     s.add_argument("--think", action="store_true",
                    help="let thinking-capable Ollama models spend tokens on reasoning; "
                    "disabled by default so the verifier receives answer code")

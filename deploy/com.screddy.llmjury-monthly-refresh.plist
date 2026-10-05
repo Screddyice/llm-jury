@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.screddy.llmjury-monthly-refresh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/screddy/projects/SRC/llm-jury/scripts/monthly-local-model-refresh.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/screddy</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/Users/screddy/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LLMJURY_OLLAMA_PARALLEL</key><string>2</string>
+    <key>LLMJURY_PROMPT_CACHE_MIB</key><string>1024</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key><integer>1</integer>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/screddy/.llmjury/monthly-refresh.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/screddy/.llmjury/monthly-refresh.err</string>
+</dict>
+</plist>

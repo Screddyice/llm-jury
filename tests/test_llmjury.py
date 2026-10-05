@@ -1447,6 +1447,28 @@ def test_cli_selects_a_safe_local_subset_after_panel_overcommit():
     assert report.ok
 
 
+def test_cli_selects_a_smaller_panel_member_when_preferred_model_does_not_fit():
+    from types import SimpleNamespace
+    from llmjury.cli import _safe_local_panel
+
+    reports = {
+        ("best", "other"): SimpleNamespace(ok=False, terminal=False,
+                                             simulator=False, pressure_reason=""),
+        ("best",): SimpleNamespace(ok=False, terminal=False,
+                                    simulator=False, pressure_reason=""),
+        ("other",): SimpleNamespace(ok=True, terminal=False,
+                                     simulator=False, pressure_reason=""),
+    }
+
+    def memory_check(models, **kwargs):
+        return reports[tuple(models)]
+
+    selected, report = _safe_local_panel(
+        ["best", "other"], "best", memory_check, "http://localhost:11434", 8192)
+    assert selected == ["other"]
+    assert report.ok
+
+
 def test_cli_keeps_ram_pressure_refusal_fail_closed():
     from types import SimpleNamespace
     from llmjury.cli import _safe_local_panel
