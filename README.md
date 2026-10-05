@@ -276,6 +276,9 @@ only local status to `~/.llmjury/monthly-refresh.json`; it has no OpenRouter or 
 The LaunchAgent pins two Ollama decode slots and a 1 GiB prompt-cache reserve, while each
 report records RAM availability, memory pressure, model residency inputs, and simulator
 co-residency so hardware refusals remain explainable.
+If the preferred configured model does not fit but another configured panel member does,
+the guarded fallback selects that admitted member. Warning-level memory pressure still
+refuses every local allocation.
 
 `--frontier-k 1` sends one generation to each frontier tier while retaining local
 best-of-4 sampling. Codex CLI frontiers default to one candidate even without this

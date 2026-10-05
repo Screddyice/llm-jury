@@ -86,12 +86,14 @@ def _frontier_label(frontier):
 
 
 def _safe_local_panel(models, best, memory_check, host, num_ctx):
-    """Choose the largest safe local subset after a full-panel refusal."""
+    """Choose the largest safe local subset after a full-panel refusal.
+
+    The preferred model is tried first, but it is not mandatory: a smaller
+    configured panel member may be the only one that fits the current host.
+    """
     ordered = list(dict.fromkeys(models))
     for size in range(len(ordered), 0, -1):
         for candidate in combinations(ordered, size):
-            if best and best not in candidate:
-                continue
             report = memory_check(candidate, host=host, num_ctx=num_ctx)
             if report.ok:
                 return list(candidate), report
