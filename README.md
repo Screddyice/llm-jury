@@ -522,12 +522,11 @@ the estimate stops being pessimistic:
 export LLMJURY_OLLAMA_PARALLEL=2      # match OLLAMA_NUM_PARALLEL on the server
 ```
 
-The budget defaults to 70% of physical RAM, since the remainder is not slack: it is the
-OS, the editor, the browser, and the agent session that launched the run. Models another
-session already has resident are counted too. Tune with `LLMJURY_MEM_FRACTION`, or relax
-the guard with `--mem-check warn` (proceed anyway) or `--mem-check off`. When the check
-cannot determine an answer, because Ollama is unreachable or RAM is unreadable, it skips
-rather than blocking: it exists to stop a known-bad run, not to invent new failures.
+On macOS, the normal solve path leaves RAM admission to macOS and Ollama. The former
+byte-budget remains available as an explicit diagnostic with `--mem-check refuse`; use
+`--mem-check off` to make that choice explicit on any host. The shared compute lock and
+Ollama leases still coordinate cooperating clients, but they do not impose a second RAM
+boundary.
 
 The shipped panel is sized to fit a 36 GB host at ~19 GB and stays cross-lineage
 (Meta / Microsoft / IBM). Panel strength matters less here than it would in a voting
@@ -762,7 +761,8 @@ Other local clients can share the read-only admission check:
 llmjury preflight --models qwen3.5:4b --num-ctx 24576
 ```
 
-It returns JSON and exits 0 only on admission, without inference or cloud calls.
+It returns JSON and exits 0 only on admission, without inference or cloud calls. This is
+an opt-in diagnostic; normal macOS solves do not run this byte-budget gate.
 The check includes Backdoor's live-process leases and 27B residency. Exclusive
 ownership blocks all jury providers; memory refusals can still use an explicitly
 configured remote frontier. `solve --backend ollama` and `reproduce --backend ollama` hold a nonblocking process
@@ -773,9 +773,9 @@ on process exit. This coordinates participating clients, not arbitrary direct
 Ollama calls, and does not preempt an inference if Qwen starts afterward.
 
 Verification: `python tests/test_llmjury.py` and
-`python tests/test_memory_pressure.py` run without model inference. Existing
-panel-fit measurements above exclude the extra prompt-cache reserve; use the
-current preflight before starting a council on a busy desktop.
+`python tests/test_memory_pressure.py` run without model inference. Use the
+preflight command when you want an explicit estimate; macOS and Ollama remain the
+normal runtime authorities.
 
 Run the full offline suite with `python -m pytest -q`. Synthetic panel tests use the
 package's default memory fraction, so a desktop's `LLMJURY_MEM_FRACTION` override cannot

@@ -4,6 +4,7 @@ import sys
 import json
 import argparse
 import shutil
+import platform
 from itertools import combinations
 from pathlib import Path
 
@@ -180,7 +181,12 @@ def _require_compute_available():
             f"owner: {owner}\n"
             "The local council and every frontier provider, including OpenRouter, "
             "remain disabled until the 27B route releases the host."
-        )
+)
+
+# macOS and Ollama already own memory pressure and model residency. The former
+# byte-budget preflight remains available as an explicit diagnostic/opt-in, but
+# it must not block the normal local path on unified-memory Macs.
+DEFAULT_MEM_CHECK = "off" if platform.system() == "Darwin" else "refuse"
 
 
 def cmd_solve(a):
@@ -506,11 +512,9 @@ def main():
                    "0 = the server's default). Ollama sizes each model's KV cache as "
                    "num_ctx x OLLAMA_NUM_PARALLEL at load, so a lean value here is what "
                    "lets the whole council decode in parallel without evictions")
-    s.add_argument("--mem-check", choices=["refuse", "warn", "off"], default="refuse",
-                   help="preflight the local panel against physical RAM, --backend ollama "
-                   "only (default refuse). A panel that does not fit does not fail "
-                   "cleanly: it over-commits unified memory and can panic the host. "
-                   "Tune the ceiling with LLMJURY_MEM_FRACTION (default 0.70)")
+    s.add_argument("--mem-check", choices=["refuse", "warn", "off"], default=DEFAULT_MEM_CHECK,
+                   help="optional custom RAM preflight for --backend ollama (default off on macOS; "
+                   "refuse elsewhere). macOS and Ollama remain the memory authority")
     s.add_argument("--think", action="store_true",
                    help="let thinking-capable Ollama models spend tokens on reasoning; "
                    "disabled by default so the verifier receives answer code")
