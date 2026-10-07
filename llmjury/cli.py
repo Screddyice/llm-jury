@@ -296,25 +296,22 @@ def _cmd_solve(a):
             probe_best, probe_panel = default_panel(backend.name)
             probe = [probe_best] + list(probe_panel)
         probe = ([best] if best else []) + [m for m in probe if m not in route]
-        # Preflight: refuse a panel that would not fit in RAM. A council loads every
-        # panelist at once and Ollama caps residency by model count, not bytes, so an
-        # over-large panel takes the host down (wired GPU allocations cannot be paged
-        # out; the kernel watchdog panics) rather than failing in a way we could catch.
+        # Optional full-panel diagnostic. The scheduler admits each stage under
+        # aggregate memory guards, so members that cannot fit together may still
+        # participate in separate stages. Never prune such members from the solve.
         if a.mem_check != "off":
             from .memguard import check as memory_check
             report = memory_check(probe, host=backend.host, num_ctx=a.num_ctx)
             if not report.ok:
                 sys.stderr.write("[llmjury] " + report.message() + "\n")
-                local_models = [model for model in (panel or []) if model not in route]
+                local_models = [model for model in (panel or probe) if model not in route]
                 local_best = best if best in local_models else (local_models[0] if local_models else None)
                 selected, selected_report = _safe_local_panel(
                     local_models, local_best, memory_check, backend.host, a.num_ctx)
                 if selected:
-                    routed = [model for model in (panel or []) if model in route]
-                    panel = selected + routed
-                    best = selected[0] if best not in panel else best
                     sys.stderr.write(
-                        "[llmjury] full local panel refused; using admitted local subset: "
+                        "[llmjury] full local panel refused; a subset fits; "
+                        "scheduler will admit each stage: "
                         + ", ".join(selected) + "\n")
                     report = selected_report
                 if not selected and a.mem_check == "refuse":
@@ -329,7 +326,13 @@ def _cmd_solve(a):
                     #                    Not selectable today (--frontier-backend is
                     #                    openrouter/codex); kept so that adding
                     #                    it cannot silently re-open the hole.
-                    if frontier and not report.terminal and a.frontier_backend != "ollama":
+                    routed = [model for model in (panel or []) if model in route]
+                    if routed and not report.terminal:
+                        panel, best = routed, routed[0]
+                        sys.stderr.write(
+                            "[llmjury] local panel refused; retaining explicitly routed "
+                            "council members: " + ", ".join(routed) + "\n")
+                    elif frontier and not report.terminal and a.frontier_backend != "ollama":
                         use_panel = False
                         frontier_providers = (
                             f"{a.frontier_backend}, then {rescue_backend}"
@@ -347,9 +350,11 @@ def _cmd_solve(a):
                             f"panic it.\nhint: {report.hint()}\n"
                             "or: add --frontier auto to escalate to the cloud ladder, which "
                             "needs no local memory\n"
-                            "override: --mem-check warn (proceed anyway) or off (skip the check)")
+                            "The scheduler also enforces memory admission for every local stage.")
                 elif not selected:
-                    sys.stderr.write(f"[llmjury] proceeding anyway: {report.hint()}\n")
+                    sys.stderr.write(
+                        f"[llmjury] diagnostic warning: {report.hint()}; "
+                        "scheduler will enforce stage admission\n")
         for warning in baked_system_warnings(
                 probe, lambda m: show_system_chars(backend.host, m)):
             sys.stderr.write(warning + "\n")
@@ -522,8 +527,8 @@ def main():
                    "num_ctx x OLLAMA_NUM_PARALLEL at load, so a lean value here is what "
                    "lets the whole council decode in parallel without evictions")
     s.add_argument("--mem-check", choices=["refuse", "warn", "off"], default=DEFAULT_MEM_CHECK,
-                   help="optional custom RAM preflight for --backend ollama (default off on macOS; "
-                   "refuse elsewhere). macOS and Ollama remain the memory authority")
+                   help="full-panel RAM diagnostic (default off on macOS; refuse elsewhere). "
+                   "Per-stage local memory admission remains mandatory")
     s.add_argument("--think", action="store_true",
                    help="let thinking-capable Ollama models spend tokens on reasoning; "
                    "disabled by default so the verifier receives answer code")

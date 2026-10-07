@@ -84,8 +84,12 @@ class Backend:
         backend (e.g. Ollama with OLLAMA_NUM_PARALLEL > 1) sees every request at
         once and can batch them into a single decode pass.
         """
-        return [ex.submit(self._sample, model, prompt, temperature, max_tokens, i)
+        return [self.submit_sample(ex, model, prompt, i, temperature, max_tokens)
                 for i in range(n)]
+
+    def submit_sample(self, ex, model, prompt, index, temperature=0.7, max_tokens=4000):
+        """Queue one indexed sample so a council can interleave model requests."""
+        return ex.submit(self._sample, model, prompt, temperature, max_tokens, index)
 
 
 class OpenRouterBackend(Backend):
