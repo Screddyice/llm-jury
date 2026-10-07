@@ -237,6 +237,30 @@ Use `--scope project` to install the Claude skill in only the current repository
 
 ## Codex Fusion
 
+### Choosing a pathway and prioritizing scarce local capacity
+
+`solve` plans from the task contract and oracle before local generation. In
+`--pathway auto`, an explicit complexity constraint starts the council;
+other tasks start with one model and add council members after verification
+fails. `--pathway single`, `council`, or `analyst` selects a policy explicitly.
+The scheduler still checks current memory and active reservations under its
+lock. One admitted model generates candidates first; analysis runs after
+generation releases its reservation and cannot displace a generator.
+
+`--task-kind` accepts `general`, `parsing`, `algorithms`, or `transformation`.
+Its default `auto` uses visible keyword hints from the task contract. An
+orchestrator can supply a reviewed label for ambiguous tasks. Local model
+ranking uses measured verifier pass rate per elapsed stage time from the last
+30 comparable runs, matching task kind, oracle type, context, and sample budget.
+Until each competing model has three observations, the configured order stays
+in place. An explicit `--best` preserves the chosen first model.
+
+The result's `routing` receipt records task kind, ranking basis, admitted paths,
+and analyst status. Metrics in `~/.llmjury/routing.jsonl` contain model names,
+resource settings, verdicts, and elapsed time only. Cached candidates do not
+train rankings. These rankings estimate value from this device's observations;
+they do not claim a universal best model or authorize remote generation.
+
 ### Concurrent independent local tasks
 
 `llmjury solve --backend ollama` now shares the host compute lock with other
