@@ -241,6 +241,10 @@ def _cmd_solve(a):
     else:
         sys.exit("error: provide --tests (functional check) or --cases (stdin/stdout JSON)")
 
+    from .pathways import RoutingHistory, initial_pathway, task_profile
+    profile = task_profile(task, verifier, getattr(a, "task_kind", "auto"))
+    pathway = initial_pathway(task, getattr(a, "pathway", "auto"))
+
     backend = _backend(a.backend, num_ctx=a.num_ctx, think=a.think)
     panel = a.models.split(",") if a.models else None
     route = {}
@@ -258,7 +262,25 @@ def _cmd_solve(a):
         sys.stderr.write(
             f"[llmjury] brain panelist: {a.brain_model} via {a.brain_url} "
             "(extra council member, not the stage-1 best)\n")
+    if panel is None:
+        from .panels import default_panel
+        _, defaults = default_panel(backend.name)
+        panel = list(defaults)
     best = a.best or (panel[0] if panel else None)
+    ranking_basis = "explicit_best" if a.best else "configured_order"
+    if panel and not a.best:
+        history = RoutingHistory(getattr(a, "routing_history", None))
+        panel, ranking_basis = history.rank(panel, profile, a.k, a.num_ctx)
+        best = panel[0]
+    analyst_model = a.analyst_model if backend.name == "ollama" else None
+    routing = {
+        "pathway": pathway,
+        "task_kind": profile["task_kind"],
+        "oracle": profile["oracle"],
+        "model_order": list(panel or []),
+        "ranking_basis": ranking_basis,
+        "headroom_policy": "admit highest-ranked model; council and analyst only when capacity remains",
+    }
     try:
         frontier = _frontier_models(a.frontier, a.frontier_backend)
     except ValueError as e:
@@ -360,6 +382,8 @@ def _cmd_solve(a):
             sys.stderr.write(warning + "\n")
     from .verifiers import sandbox_note
     sys.stderr.write(sandbox_note()[1])            # provisions the sandbox on first call
+    from time import monotonic
+    solve_started = monotonic()
     r = Engine(backend, panel=panel, best=best, k=a.k, workers=a.jobs,
                frontier=frontier, frontier_backend=fb, route=route,
                frontier_route=frontier_route,
@@ -367,10 +391,25 @@ def _cmd_solve(a):
                frontier_defaults={"codex": 1},
                local_scheduler=_local_scheduler(backend, a.num_ctx),
                rebalance=not bool(a.best),
-               analyst_model=a.analyst_model,
+               analyst_model=analyst_model,
                analyst_backend=_backend("ollama", num_ctx=a.num_ctx)
-               if a.analyst_model and backend.name == "ollama" else None,
-               analyst_max_tokens=a.analyst_max_tokens).solve(task, verifier)
+               if analyst_model else None,
+               analyst_max_tokens=a.analyst_max_tokens,
+               pathway=pathway, routing=routing).solve(task, verifier)
+
+    # The selected model's result becomes evidence for future comparable routes.
+    # Keep the receipt explicit enough to explain the pathway decision in JSON mode.
+    if r.routing is not None:
+        r.routing.update({
+            "selected_model": r.model,
+            "selected_stage": r.stage,
+            "analyst_used": bool(r.analyst_model),
+        })
+    if (r.model and backend.name == "ollama" and r.model in (panel or [])
+            and r.model not in route):
+        RoutingHistory(getattr(a, "routing_history", None)).record(
+            r.model, profile, a.k, a.num_ctx, r.verified,
+            monotonic() - solve_started)
 
     if a.json:
         import dataclasses
@@ -383,6 +422,8 @@ def _cmd_solve(a):
         if r.analyst_model:
             sys.stderr.write(f"[llmjury] analyst={r.analyst_model} "
                              f"(verifier remains acceptance gate)\n")
+        sys.stderr.write(f"[llmjury] pathway={r.routing.get('pathway') if r.routing else pathway} "
+                         f"task_kind={profile['task_kind']} ranking={ranking_basis}\n")
         if r.verified:
             print(r.answer)            # only verified code reaches stdout
         else:
@@ -563,6 +604,11 @@ def main():
                    help="skip the local analyst and use verifier completion order")
     s.add_argument("--analyst-max-tokens", type=_positive_count, default=1200,
                    help="maximum analyst response tokens (default: 1200)")
+    s.add_argument("--pathway", choices=["auto", "single", "council", "analyst"], default="auto",
+                   help="jury pathway; auto selects from task contract and oracle")
+    s.add_argument("--task-kind", choices=["auto", "general", "parsing", "algorithms", "transformation"],
+                   default="auto", help="task class used for comparable local routing history")
+    s.add_argument("--routing-history", help="path for local routing metrics (default ~/.llmjury/routing.jsonl)")
     s.set_defaults(func=cmd_solve)
 
     sub.add_parser("demo", help="run the full pipeline offline — no API key, no Ollama") \
