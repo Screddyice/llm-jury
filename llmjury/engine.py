@@ -36,6 +36,7 @@ class Result:
     attempts: int           # samples that finished generating before the verdict
     analyst_model: str | None = None
     analyst_summary: dict | None = None
+    routing: dict | None = None
 
 
 def sample_counts(k, frontier_k=None):
@@ -65,7 +66,8 @@ class Engine:
                  route=None, frontier_route=None, workers=None, frontier_max_tokens=None,
                  use_panel=True, frontier_k=None, frontier_defaults=None,
                  local_scheduler=None, rebalance=True, analyst_model=None,
-                 analyst_backend=None, analyst_max_tokens=1200):
+                 analyst_backend=None, analyst_max_tokens=1200,
+                 pathway=None, routing=None):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -110,6 +112,15 @@ class Engine:
         self.analyst_model = analyst_model
         self.analyst_backend = analyst_backend or backend
         self.analyst_max_tokens = analyst_max_tokens
+        if pathway not in (None, "single", "council", "analyst"):
+            raise ValueError("unknown jury pathway")
+        self.pathway = pathway
+        self.routing = routing or {}
+
+    def _result(self, answer, raw, verified, model, stage, attempts,
+                analyst_model=None, analyst_summary=None):
+        return Result(answer, raw, verified, model, stage, attempts,
+                      analyst_model, analyst_summary, self.routing)
 
     def _submit(self, ex, pairs, prompt, max_tokens=None, samples=None):
         """Queue stage samples for each (model, backend); return {future: model}.
@@ -159,36 +170,51 @@ class Engine:
         def frontier_backend_for(m):
             return self.frontier_route.get(m, self.frontier_backend)
 
-        def run_stage(ex, pairs, stage, max_tokens=None, samples=None, analyst=None):
+        def select_with_analyst(completed, stage, attempts, analyst):
+            if len(completed) > 1:
+                from .analysis import parse, prompt as analyst_prompt
+                if self.local_scheduler and getattr(analyst, "name", None) == "ollama":
+                    with self.local_scheduler.reserve([self.analyst_model]) as admitted:
+                        if admitted is None:
+                            return next((self._result(extract_code(text), text, True, model, stage,
+                                                      attempts, self.analyst_model, None)
+                                         for model, text, passed in completed if passed), None)
+                        self.routing.setdefault("admitted_models", []).append([admitted])
+                        raw = analyst.complete(
+                            self.analyst_model, analyst_prompt(task, completed), n=1,
+                            temperature=0, max_tokens=self.analyst_max_tokens)[0]
+                else:
+                    raw = analyst.complete(
+                        self.analyst_model, analyst_prompt(task, completed), n=1,
+                        temperature=0, max_tokens=self.analyst_max_tokens)[0]
+                order, summary = parse(raw, len(completed))
+                for index in order:
+                    model, text, passed = completed[index]
+                    if passed:
+                        return self._result(extract_code(text), text, True, model, stage,
+                                            attempts, self.analyst_model, summary)
+            else:
+                for model, text, passed in completed:
+                    if passed:
+                        return self._result(extract_code(text), text, True, model, stage,
+                                            attempts, self.analyst_model, None)
+            return None
+
+        def run_stage(ex, pairs, stage, max_tokens=None, samples=None, analyst=None,
+                      defer_verdict=False):
             if self.local_scheduler:
                 self.local_scheduler.require_available()
             futures = self._submit(ex, pairs, prompt, max_tokens, samples)
+            completed = []
             try:
-                completed = []
                 for fut, model in _in_completion_order(futures):
                     out = fut.result()
                     for text in ([out] if isinstance(out, str) else out):
                         seen.append((model, text))
                         passed = verifier.verify(text)
                         completed.append((model, text, passed))
-                        if analyst is None and passed:
-                            return Result(extract_code(text), text, True, model, stage, len(seen))
-                if analyst is not None and len(completed) > 1:
-                    from .analysis import parse, prompt as analyst_prompt
-                    raw = analyst.complete(
-                        self.analyst_model, analyst_prompt(task, completed), n=1,
-                        temperature=0, max_tokens=self.analyst_max_tokens)[0]
-                    order, summary = parse(raw, len(completed))
-                    for index in order:
-                        model, text, passed = completed[index]
-                        if passed:
-                            return Result(extract_code(text), text, True, model, stage,
-                                          len(seen), self.analyst_model, summary)
-                elif analyst is not None:
-                    for model, text, passed in completed:
-                        if passed:
-                            return Result(extract_code(text), text, True, model, stage,
-                                          len(seen), self.analyst_model, None)
+                        if analyst is None and not defer_verdict and passed:
+                            return self._result(extract_code(text), text, True, model, stage, len(seen))
             finally:
                 if self.local_scheduler:
                     # Keep the reservation until running samples finish. A winning
@@ -196,12 +222,19 @@ class Engine:
                     for future in futures:
                         future.cancel()
                     wait(futures)
+            if defer_verdict:
+                return completed, len(seen)
+            if analyst is not None:
+                return select_with_analyst(completed, stage, len(seen), analyst)
             return None
 
         def scheduled_local(ex):
             remaining = list(dict.fromkeys([self.best, *self.panel]))
             selected = None
-            if backend_for(self.best).name != "ollama":
+            legacy = self.pathway is None
+            if self.pathway in ("council", "analyst"):
+                r = None
+            elif backend_for(self.best).name != "ollama":
                 selected = self.best
                 r = run_stage(ex, [(selected, backend_for(selected))], "single")
             else:
@@ -209,9 +242,17 @@ class Engine:
                 if not self.rebalance:
                     choices = [self.best]
                 with self.local_scheduler.reserve(choices, preferred=self.best) as selected:
+                    if selected is not None:
+                        self.routing.setdefault("admitted_models", []).append([selected])
                     r = (run_stage(ex, [(selected, backend_for(selected))], "single")
                          if selected is not None else None)
-            if r or not escalate:
+            if self.pathway == "single" and (r or not escalate):
+                return r
+            if self.pathway == "single":
+                if selected is not None:
+                    remaining.remove(selected)
+                return None
+            if legacy and r:
                 return r
             if selected is not None:
                 remaining.remove(selected)
@@ -228,21 +269,27 @@ class Engine:
             while remaining:
                 local = [m for m in remaining if backend_for(m).name == "ollama"]
                 routed = [m for m in remaining if backend_for(m).name != "ollama"]
-                analyst_local = (self.analyst_model and
-                                 self.analyst_backend.name == "ollama")
                 reserve_candidates = list(local)
-                if analyst_local:
-                    reserve_candidates.append(self.analyst_model)
+                deferred = None
                 with self.local_scheduler.reserve_many(reserve_candidates) as admitted:
                     models = admitted + routed
+                    if admitted:
+                        self.routing.setdefault("admitted_models", []).append(list(admitted))
+                    if routed:
+                        self.routing.setdefault("routed_models", []).extend(routed)
                     generated = [m for m in models if m in local or m in routed]
-                    analyst = (self.analyst_backend if analyst_local and
-                               self.analyst_model in admitted else None)
+                    analyst = (self.analyst_backend if self.analyst_model and
+                               self.pathway in (None, "analyst") and len(generated) > 1 else None)
                     if generated:
-                        r = run_stage(ex, [(m, backend_for(m)) for m in generated],
-                                      "council", analyst=analyst)
-                        if r:
-                            return r
+                        deferred = run_stage(
+                            ex, [(m, backend_for(m)) for m in generated], "council",
+                            defer_verdict=analyst is not None)
+                        if analyst is None and deferred:
+                            return deferred
+                if analyst is not None and deferred:
+                    r = select_with_analyst(deferred[0], "council", deferred[1], analyst)
+                    if r:
+                        return r
                 if not admitted:
                     break
                 remaining = [m for m in remaining if m not in models]
@@ -255,19 +302,24 @@ class Engine:
                 if r:
                     return r
             elif self.use_panel:
-                # Stage 1: single best model, best-of-k.
-                r = run_stage(ex, [(self.best, backend_for(self.best))], "single")
-                if r:
-                    return r
-
-                # Stage 2: the rest of the diverse council, all panelists at once
-                # (skip best, already tried).
-                if escalate:
-                    rest = [(m, backend_for(m)) for m in self.panel if m != self.best]
-                    if rest:
-                        r = run_stage(ex, rest, "council")
-                        if r:
-                            return r
+                if self.pathway in (None, "single"):
+                    r = run_stage(ex, [(self.best, backend_for(self.best))], "single")
+                    if r:
+                        return r
+                if self.pathway is None:
+                    pairs = [(m, backend_for(m)) for m in self.panel if m != self.best]
+                    r = run_stage(ex, pairs, "council",
+                                  analyst=(self.analyst_backend
+                                           if self.analyst_model else None)) if pairs else None
+                    if r:
+                        return r
+                elif self.pathway in ("council", "analyst"):
+                    pairs = [(m, backend_for(m)) for m in self.panel]
+                    r = run_stage(ex, pairs, "council",
+                                  analyst=(self.analyst_backend
+                                           if self.pathway == "analyst" else None))
+                    if r:
+                        return r
 
             # Stage 3: opt-in frontier escalation — one strong (cloud) model, only when
             # the local council couldn't verify. This is what lets a local-first setup
@@ -295,9 +347,9 @@ class Engine:
             if code and (best is None or len(code) > len(best[2])):
                 best = (model, text, code)
         if best:
-            return Result(best[2], best[1], False, best[0], "unverified", len(seen))
+            return self._result(best[2], best[1], False, best[0], "unverified", len(seen))
         first_model, first_text = seen[0] if seen else (None, None)
-        return Result(None, first_text, False, first_model, "unverified", len(seen))
+        return self._result(None, first_text, False, first_model, "unverified", len(seen))
 
 
 def _in_completion_order(futmap):

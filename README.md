@@ -255,6 +255,10 @@ ranking uses measured verifier pass rate per elapsed stage time from the last
 Until each competing model has three observations, the configured order stays
 in place. An explicit `--best` preserves the chosen first model.
 
+The local `analyst` pathway uses the configured Qwen analyst after at least two
+candidates finish. It takes its own reservation after generation releases its
+lanes; when only one model fits, the verifier chooses that candidate directly.
+
 The result's `routing` receipt records task kind, ranking basis, admitted paths,
 and analyst status. Metrics in `~/.llmjury/routing.jsonl` contain model names,
 resource settings, verdicts, and elapsed time only. Cached candidates do not

@@ -36,7 +36,7 @@ def initial_pathway(task, requested="auto"):
     if requested not in PATHWAYS:
         raise ValueError("unknown jury pathway")
     if requested != "auto":
-        return "single" if requested == "single" else "council"
+        return requested
     # Explicit complexity constraints justify diversity sooner. Other tasks
     # keep the cheap single-model first tier and escalate on oracle failures.
     return "council" if re.search(r"\b(worst.case|dynamic programming|shortest path)\b|\bO\(", task,

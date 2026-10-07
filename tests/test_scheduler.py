@@ -595,6 +595,36 @@ def test_analyst_ranks_council_candidates_before_verifier_selection(scheduler_en
     assert any(prompt.startswith("You are the local council analyst") for _, prompt in calls)
 
 
+def test_explicit_analyst_pathway_admits_qwen_worker_after_generation(scheduler_environment):
+    calls = []
+
+    class Model(Backend):
+        name = "ollama"
+
+        def _one(self, model, prompt, *_):
+            calls.append((model, prompt))
+            if prompt.startswith("You are the local council analyst"):
+                return '{"order":[1,0],"consensus":"ok","conflicts":"none","gaps":"none"}'
+            return "def solve():\n    return " + ("1" if model == "gemma" else "0")
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    model = Model()
+    result = Engine(
+        model, panel=["phi", "gemma"], best="phi", k=1, pathway="analyst",
+        analyst_model="qwen", analyst_backend=model, workers=2,
+        local_scheduler=LocalScheduler("http://localhost:11434", wait_seconds=0),
+    ).solve("choose the correct implementation", Verifier())
+
+    assert result.verified and result.model == "gemma"
+    assert result.analyst_model == "qwen"
+    assert result.analyst_summary == {"consensus": "ok", "conflicts": "none", "gaps": "none"}
+    assert any(model == "qwen" and prompt.startswith("You are the local council analyst")
+               for model, prompt in calls)
+
+
 def test_analyst_parse_fails_closed_to_generation_order():
     from llmjury.analysis import parse
 
