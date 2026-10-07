@@ -548,11 +548,12 @@ the estimate stops being pessimistic:
 export LLMJURY_OLLAMA_PARALLEL=2      # match OLLAMA_NUM_PARALLEL on the server
 ```
 
-On macOS, the normal solve path leaves RAM admission to macOS and Ollama. The former
-byte-budget remains available as an explicit diagnostic with `--mem-check refuse`; use
-`--mem-check off` to make that choice explicit on any host. The shared compute lock and
-Ollama leases still coordinate cooperating clients, but they do not impose a second RAM
-boundary.
+On macOS, the earlier full-panel diagnostic remains optional; `--mem-check refuse`
+enables it and `--mem-check off` skips it. Scheduled solves check each selected
+model against aggregate reservations before generation on every host. This
+separate mandatory check prevents two jobs from each assuming the same free RAM.
+It retains the physical ceiling, desktop reserve, pressure checks, and exclusive
+ownership holds described above. macOS and Ollama still manage model residency.
 
 The shipped panel is sized to fit a 36 GB host at ~19 GB and stays cross-lineage
 (Meta / Microsoft / IBM). Panel strength matters less here than it would in a voting

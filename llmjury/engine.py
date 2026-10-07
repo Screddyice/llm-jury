@@ -130,10 +130,12 @@ class Engine:
     def solve(self, task, verifier, escalate=True):
         """Solve a task; returns the first verified Result the ladder produces.
 
-        On an early verified exit, samples still decoding are abandoned — their
+        Without a local scheduler, samples still decoding are abandoned — their
         threads finish (and are discarded) in the background. The CLI exits the
         process right after printing, which closes those connections and lets
         the backend cancel the leftover decodes.
+        Scheduled stages retain their model reservation until running samples
+        finish, so another task cannot reuse memory still occupied by a decode.
         """
         prompt = self.prompt_template.format(task=task)
         seen = []       # every completed (model, text): attempt count + fallback pool

@@ -28,7 +28,7 @@ def choose_model(models, preferred, busy):
 class LocalScheduler:
     def __init__(self, host, num_ctx=8192, wait_seconds=30):
         self.host = host.rstrip("/")
-        self.num_ctx = num_ctx or memguard.SERVER_DEFAULT_CTX
+        self.num_ctx = num_ctx if num_ctx and num_ctx > 0 else memguard.SERVER_DEFAULT_CTX
         self.wait_seconds = wait_seconds
         lock = Path(os.environ.get("LLMJURY_LOCAL_LOCK") or
                     Path.home() / ".cache/llmjury/local-compute.lock")
@@ -42,6 +42,12 @@ class LocalScheduler:
 
     @contextmanager
     def reserve(self, models, preferred=None):
+        with memguard.local_compute_lock(shared=True):
+            with self._reserve(models, preferred) as selected:
+                yield selected
+
+    @contextmanager
+    def _reserve(self, models, preferred=None):
         """Reserve one idle model, or yield None for verifier-gated fallback."""
         import fcntl
         candidates = list(dict.fromkeys(models))
@@ -78,6 +84,9 @@ class LocalScheduler:
                                     raise RuntimeError("cannot read active local reservation") from error
                                 finally:
                                     handle.close()
+                            except BaseException:
+                                handle.close()
+                                raise
                         busy = [canonical(row["model"]) for row in active]
                         choices = list(candidates)
                         refusal = None
