@@ -183,9 +183,9 @@ def _require_compute_available():
             "remain disabled until the 27B route releases the host."
 )
 
-# macOS and Ollama already own memory pressure and model residency. The former
-# byte-budget preflight remains available as an explicit diagnostic/opt-in, but
-# it must not block the normal local path on unified-memory Macs.
+# The full-panel diagnostic stays opt-in on macOS. The scheduler checks the
+# selected model and concurrent reservations before any local generation;
+# macOS and Ollama continue to manage pressure and model residency.
 DEFAULT_MEM_CHECK = "off" if platform.system() == "Darwin" else "refuse"
 
 
