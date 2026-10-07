@@ -263,6 +263,13 @@ The full-panel diagnostic keeps members that can fit in separate stages.
 CI runs the full offline pytest suite, including scheduler and council tests,
 on each supported Python version.
 
+When a council stage has more than one candidate, the local Qwen analyst compares
+their verifier results and ranks the candidates. It reports consensus, conflicts,
+and gaps, then the verifier checks candidates in that order. The analyst cannot
+approve code, and a malformed analyst response falls back to generation order.
+Use `--no-analyst` to disable it or `--analyst-model` to select another local
+model. The default is `qwen3.5:4b` for local solves.
+
 This preserves LLM-Jury's existing OpenRouter backend behavior. The separate
 [OpenRouter Fusion Router](https://openrouter.ai/docs/guides/routing/routers/fusion-router)
 offers panel deliberation followed by analyst input to a final answer;
