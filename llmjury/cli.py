@@ -366,7 +366,11 @@ def _cmd_solve(a):
                use_panel=use_panel, frontier_k=getattr(a, "frontier_k", None),
                frontier_defaults={"codex": 1},
                local_scheduler=_local_scheduler(backend, a.num_ctx),
-               rebalance=not bool(a.best)).solve(task, verifier)
+               rebalance=not bool(a.best),
+               analyst_model=a.analyst_model,
+               analyst_backend=_backend("ollama", num_ctx=a.num_ctx)
+               if a.analyst_model and backend.name == "ollama" else None,
+               analyst_max_tokens=a.analyst_max_tokens).solve(task, verifier)
 
     if a.json:
         import dataclasses
@@ -376,6 +380,9 @@ def _cmd_solve(a):
         status = "VERIFIED" if r.verified else "UNVERIFIED (no candidate passed)"
         sys.stderr.write(
             f"# llmjury: {status}  [stage={r.stage}, model={r.model}, attempts={r.attempts}]\n\n")
+        if r.analyst_model:
+            sys.stderr.write(f"[llmjury] analyst={r.analyst_model} "
+                             f"(verifier remains acceptance gate)\n")
         if r.verified:
             print(r.answer)            # only verified code reaches stdout
         else:
@@ -550,6 +557,12 @@ def main():
                    help="OpenAI-compatible base URL for --brain (default: local MLX server)")
     s.add_argument("--brain-model", default="mlx-community/Qwen3.5-4B-MLX-4bit",
                    help="model id the --brain endpoint serves")
+    s.add_argument("--analyst-model", default="qwen3.5:4b",
+                   help="local model that compares council candidates (default: qwen3.5:4b)")
+    s.add_argument("--no-analyst", dest="analyst_model", action="store_const", const=None,
+                   help="skip the local analyst and use verifier completion order")
+    s.add_argument("--analyst-max-tokens", type=_positive_count, default=1200,
+                   help="maximum analyst response tokens (default: 1200)")
     s.set_defaults(func=cmd_solve)
 
     sub.add_parser("demo", help="run the full pipeline offline — no API key, no Ollama") \
