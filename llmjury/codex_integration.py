@@ -115,6 +115,11 @@ configured members available. Explicit members routed to another backend still
 participate after local refusal. Samples interleave across built-in backends,
 so two generation workers can start two council members together.
 
+After a council produces multiple candidates, the local Qwen analyst compares
+their verifier results and ranks them. The verifier still accepts or rejects
+the code; the analyst only orders candidates and reports consensus, conflicts,
+and gaps. Use `--no-analyst` to disable it.
+
 Use the existing verifier council for code units. The separate OpenRouter Fusion
 Router's analyst workflow does not replace LLM-Jury's independent oracle. Keep
 normal local-first generation and authenticated Codex escalation on this device.

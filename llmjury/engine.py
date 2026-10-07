@@ -34,6 +34,8 @@ class Result:
     model: str | None       # which model produced the chosen sample
     stage: str              # "single", "council", "frontier", or "unverified"
     attempts: int           # samples that finished generating before the verdict
+    analyst_model: str | None = None
+    analyst_summary: dict | None = None
 
 
 def sample_counts(k, frontier_k=None):
@@ -62,7 +64,8 @@ class Engine:
                  k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
                  route=None, frontier_route=None, workers=None, frontier_max_tokens=None,
                  use_panel=True, frontier_k=None, frontier_defaults=None,
-                 local_scheduler=None, rebalance=True):
+                 local_scheduler=None, rebalance=True, analyst_model=None,
+                 analyst_backend=None, analyst_max_tokens=1200):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -104,6 +107,9 @@ class Engine:
         self.workers = workers or min(16, max(4, self.k * max(1, len(self.panel))))
         self.local_scheduler = local_scheduler
         self.rebalance = rebalance
+        self.analyst_model = analyst_model
+        self.analyst_backend = analyst_backend or backend
+        self.analyst_max_tokens = analyst_max_tokens
 
     def _submit(self, ex, pairs, prompt, max_tokens=None, samples=None):
         """Queue stage samples for each (model, backend); return {future: model}.
@@ -153,17 +159,36 @@ class Engine:
         def frontier_backend_for(m):
             return self.frontier_route.get(m, self.frontier_backend)
 
-        def run_stage(ex, pairs, stage, max_tokens=None, samples=None):
+        def run_stage(ex, pairs, stage, max_tokens=None, samples=None, analyst=None):
             if self.local_scheduler:
                 self.local_scheduler.require_available()
             futures = self._submit(ex, pairs, prompt, max_tokens, samples)
             try:
+                completed = []
                 for fut, model in _in_completion_order(futures):
                     out = fut.result()
                     for text in ([out] if isinstance(out, str) else out):
                         seen.append((model, text))
-                        if verifier.verify(text):
+                        passed = verifier.verify(text)
+                        completed.append((model, text, passed))
+                        if analyst is None and passed:
                             return Result(extract_code(text), text, True, model, stage, len(seen))
+                if analyst is not None and len(completed) > 1:
+                    from .analysis import parse, prompt as analyst_prompt
+                    raw = analyst.complete(
+                        self.analyst_model, analyst_prompt(task, completed), n=1,
+                        temperature=0, max_tokens=self.analyst_max_tokens)[0]
+                    order, summary = parse(raw, len(completed))
+                    for index in order:
+                        model, text, passed = completed[index]
+                        if passed:
+                            return Result(extract_code(text), text, True, model, stage,
+                                          len(seen), self.analyst_model, summary)
+                elif analyst is not None:
+                    for model, text, passed in completed:
+                        if passed:
+                            return Result(extract_code(text), text, True, model, stage,
+                                          len(seen), self.analyst_model, None)
             finally:
                 if self.local_scheduler:
                     # Keep the reservation until running samples finish. A winning
@@ -203,10 +228,19 @@ class Engine:
             while remaining:
                 local = [m for m in remaining if backend_for(m).name == "ollama"]
                 routed = [m for m in remaining if backend_for(m).name != "ollama"]
-                with self.local_scheduler.reserve_many(local) as admitted:
+                analyst_local = (self.analyst_model and
+                                 self.analyst_backend.name == "ollama")
+                reserve_candidates = list(local)
+                if analyst_local:
+                    reserve_candidates.append(self.analyst_model)
+                with self.local_scheduler.reserve_many(reserve_candidates) as admitted:
                     models = admitted + routed
-                    if models:
-                        r = run_stage(ex, [(m, backend_for(m)) for m in models], "council")
+                    generated = [m for m in models if m in local or m in routed]
+                    analyst = (self.analyst_backend if analyst_local and
+                               self.analyst_model in admitted else None)
+                    if generated:
+                        r = run_stage(ex, [(m, backend_for(m)) for m in generated],
+                                      "council", analyst=analyst)
                         if r:
                             return r
                 if not admitted:

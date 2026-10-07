@@ -564,3 +564,40 @@ def test_cli_subset_diagnostic_keeps_members_for_later_stages(
     with pytest.raises(SystemExit) as exit_info:
         cli.main()
     assert exit_info.value.code == 0
+
+
+def test_analyst_ranks_council_candidates_before_verifier_selection(scheduler_environment):
+    calls = []
+
+    class Model(Backend):
+        name = "ollama"
+
+        def _one(self, model, prompt, *_):
+            calls.append((model, prompt))
+            if prompt.startswith("You are the local council analyst"):
+                return '{"order":[1,0],"consensus":"same shape","conflicts":"none","gaps":"none"}'
+            return ("def solve():\n    return 1" if model == "gemma" else
+                    "def solve():\n    return 0")
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    model = Model()
+    result = Engine(model, panel=["best", "phi", "gemma"], best="best", k=1,
+                    analyst_model="phi", analyst_backend=model, workers=2,
+                    local_scheduler=LocalScheduler("http://localhost:11434", wait_seconds=0)) \
+        .solve("choose the correct implementation", Verifier())
+    assert result.verified and result.stage == "council" and result.model == "gemma"
+    assert result.analyst_model == "phi"
+    assert result.analyst_summary == {
+        "consensus": "same shape", "conflicts": "none", "gaps": "none"}
+    assert any(prompt.startswith("You are the local council analyst") for _, prompt in calls)
+
+
+def test_analyst_parse_fails_closed_to_generation_order():
+    from llmjury.analysis import parse
+
+    assert parse("not json", 3) == ([0, 1, 2], None)
+    assert parse('{"order":[0,0]}', 2) == ([0, 1], None)
+    assert parse('{"order":[1,0],"consensus":"ok"}', 2)[0] == [1, 0]
