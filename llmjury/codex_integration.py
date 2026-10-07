@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 4 -->"
+MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 5 -->"
 MANAGED_PREFIX = "<!-- managed by llmjury install-codex; version:"
 LEGACY_MANAGED_DIGESTS = {
     "a2e067b1e03119e0ac9ea267b86db3f11e2a13c0a14a9cfc2f463011b3109a50",
@@ -18,7 +18,7 @@ SKILL = """\
 name: llm-jury-orchestrate
 description: Use LLM-Jury inside the Codex app for verifier-shaped code tasks, local-first fusion, and optional Claude planning.
 ---
-<!-- managed by llmjury install-codex; version: 4 -->
+<!-- managed by llmjury install-codex; version: 5 -->
 
 # LLM-Jury in the Codex app
 
@@ -106,6 +106,18 @@ Each task samples locally, tries another panel member on verification failure,
 and uses its configured ordered frontier only after local work fails or cannot
 be admitted. The scheduler checks aggregate reservations and current memory
 before generation, even when the earlier full-panel diagnostic is off.
+
+Local and OpenRouter-backed jury solves share the generate, verify, select, and
+escalate contract. After the first model fails, up to two admitted local members
+can generate for the same task in one council stage. The first verified candidate
+wins. A panel that fits one member at a time uses separate stages; keep all its
+configured members available. Explicit members routed to another backend still
+participate after local refusal. Samples interleave across built-in backends,
+so two generation workers can start two council members together.
+
+Use the existing verifier council for code units. The separate OpenRouter Fusion
+Router's analyst workflow does not replace LLM-Jury's independent oracle. Keep
+normal local-first generation and authenticated Codex escalation on this device.
 
 Do not split a dependent sequence into concurrent tasks or give separate tasks
 the same output file. Busy lanes wait up to 30 seconds before configured

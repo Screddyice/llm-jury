@@ -259,10 +259,14 @@ the remaining members run in later admitted stages. Explicit members routed
 to another backend remain in the council after a local memory refusal.
 Built-in backends interleave sample requests across models so `--jobs 2`
 can start both council members before exhausting one member's best-of-k budget.
+The full-panel diagnostic keeps members that can fit in separate stages.
+CI runs the full offline pytest suite, including scheduler and council tests,
+on each supported Python version.
 
 This preserves LLM-Jury's existing OpenRouter backend behavior. The separate
-OpenRouter Fusion Router offers panel deliberation followed by analyst input
-to a final answer; LLM-Jury accepts code through its deterministic verifier.
+[OpenRouter Fusion Router](https://openrouter.ai/docs/guides/routing/routers/fusion-router)
+offers panel deliberation followed by analyst input to a final answer;
+LLM-Jury accepts code through its deterministic verifier.
 Following the council contract does not enable paid OpenRouter generation in
 the Mac's local-first Codex workflow.
 

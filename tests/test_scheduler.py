@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import os
+import json
 from pathlib import Path
 import select
 import subprocess
@@ -12,6 +13,7 @@ import pytest
 
 from llmjury import memguard
 from llmjury.engine import Engine
+from llmjury.backends import Backend
 from llmjury.scheduler import LocalScheduler, choose_model
 
 
@@ -289,3 +291,276 @@ def test_explicit_best_is_not_rebalanced(scheduler_environment):
         result = Engine(Backend(), panel=["qwen", "phi"], best="qwen", k=1,
                         rebalance=False, local_scheduler=scheduler).solve("task", Verifier())
     assert not result.verified and not calls
+
+
+def test_group_reservation_counts_both_lanes_and_releases_after_exception(scheduler_environment):
+    scheduler = LocalScheduler("http://localhost:11434", wait_seconds=0)
+    with pytest.raises(ValueError, match="generation failed"):
+        with scheduler.reserve_many(["phi", "phi:latest", "gemma"]) as selected:
+            assert selected == ["phi", "gemma"]
+            assert scheduler_environment[-1][0] == ["phi", "gemma"]
+            with scheduler.reserve(["third"]) as third:
+                assert third is None
+            raise ValueError("generation failed")
+    with scheduler.reserve_many(["phi", "gemma"]) as selected:
+        assert selected == ["phi", "gemma"]
+
+
+def test_group_admission_terminal_refusal_releases_partial_reservation(scheduler_environment, monkeypatch):
+    def check(models, **_):
+        return memguard.Report(len(models) == 1, router=len(models) > 1, router_reason="27B lease")
+
+    monkeypatch.setattr(memguard, "check", check)
+    scheduler = LocalScheduler("http://localhost:11434", wait_seconds=0)
+    with pytest.raises(RuntimeError):
+        with scheduler.reserve_many(["phi", "gemma"]):
+            pytest.fail("terminal refusal must stop the complete stage")
+    with scheduler.reserve(["phi"]) as selected:
+        assert selected == "phi"
+
+
+def test_complementary_local_council_overlaps_with_two_workers(scheduler_environment):
+    barrier = threading.Barrier(2)
+    calls = []
+
+    class Model(Backend):
+        name = "ollama"
+
+        def _sample(self, model, prompt, temperature, max_tokens, index):
+            calls.append((model, index))
+            if model != "best" and index == 0:
+                barrier.wait(timeout=5)
+            return "def solve():\n    return " + ("1" if model == "gemma" else "0")
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    result = Engine(Model(), panel=["best", "phi", "gemma"], best="best",
+                    k=3, workers=2, local_scheduler=LocalScheduler(
+                        "http://localhost:11434", wait_seconds=0)).solve("task", Verifier())
+    assert result.verified and result.stage == "council" and result.model == "gemma"
+    assert set(calls[:3]) == {("best", 0), ("best", 1), ("best", 2)}
+    assert set(calls[3:5]) == {("phi", 0), ("gemma", 0)}
+
+
+def test_memory_constrained_council_tries_remaining_members_in_later_stages(
+        scheduler_environment, monkeypatch):
+    monkeypatch.setattr(memguard, "check", lambda models, **_: memguard.Report(len(models) == 1))
+    calls = []
+
+    class Model(Backend):
+        name = "ollama"
+
+        def _one(self, model, *_):
+            calls.append(model)
+            return "def solve():\n    return " + ("1" if model == "gemma" else "0")
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    result = Engine(Model(), panel=["best", "phi", "gemma"], best="best", k=1,
+                    local_scheduler=LocalScheduler("http://localhost:11434", wait_seconds=0))
+    result = result.solve("task", Verifier())
+    assert result.verified and result.model == "gemma" and result.stage == "council"
+    assert calls == ["best", "phi", "gemma"]
+
+
+@pytest.mark.parametrize("rebalance", [True, False])
+def test_local_refusal_preserves_explicitly_routed_member(
+        scheduler_environment, monkeypatch, rebalance):
+    monkeypatch.setattr(memguard, "check", lambda *_args, **_: memguard.Report(False))
+    calls = []
+
+    class Local(Backend):
+        name = "ollama"
+
+        def _one(self, *_):
+            pytest.fail("refused local model must not generate")
+
+    class Routed(Backend):
+        name = "codex"
+
+        def _one(self, model, *_):
+            calls.append(model)
+            return "def solve():\n    return 1"
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    result = Engine(Local(), panel=["qwen", "phi", "brain"], best="qwen", k=1,
+                    route={"brain": Routed()}, frontier=["frontier"],
+                    frontier_backend=Routed(), rebalance=rebalance,
+                    local_scheduler=LocalScheduler("http://localhost:11434", wait_seconds=0))
+    result = result.solve("task", Verifier())
+    assert result.verified and result.stage == "council" and result.model == "brain"
+    assert calls == ["brain"]
+
+
+@pytest.mark.parametrize("winner,escalate", [
+    ("best", True), ("phi", True), ("gemma", True),
+    ("cheap", True), ("top", True), (None, True), ("phi", False),
+])
+def test_scheduled_local_and_cloud_share_verification_and_escalation_contract(
+        scheduler_environment, winner, escalate):
+    class Model(Backend):
+        def __init__(self, name):
+            super().__init__()
+            self.name, self.calls = name, []
+
+        def _sample(self, model, prompt, temperature, max_tokens, index):
+            self.calls.append((model, index))
+            return "def solve():\n    return " + ("1" if model == winner else "0")
+
+    class Verifier:
+        def verify(self, text):
+            return "return 1" in text
+
+    results = []
+    for name in ("openrouter", "ollama"):
+        provider, frontier = Model(name), Model("codex")
+        result = Engine(provider, panel=["best", "phi", "gemma"], best="best", k=2,
+                        frontier=["cheap", "top"], frontier_backend=frontier, frontier_k=1,
+                        local_scheduler=(LocalScheduler("http://localhost:11434", wait_seconds=0)
+                                         if name == "ollama" else None))
+        result = result.solve("same task and oracle", Verifier(), escalate=escalate)
+        results.append((result.verified, result.stage, result.model, result.answer))
+        expected_frontier = ([("cheap", 0)] if winner == "cheap" else
+                             [("cheap", 0), ("top", 0)] if winner in ("top", None) else [])
+        assert frontier.calls == expected_frontier
+    assert results[0] == results[1]
+
+
+def test_interleaved_sampling_keeps_distinct_cache_indices(tmp_path):
+    calls, barrier = [], threading.Barrier(2)
+
+    class Model(Backend):
+        name = "ollama"
+
+        def _one(self, model, *_):
+            calls.append(model)
+            if len(calls) <= 2:
+                barrier.wait(timeout=5)
+            return "def solve():\n    return 0"
+
+    cache_path = tmp_path / "cache.jsonl"
+    backend = Model(cache_path=str(cache_path))
+    engine = Engine(backend, k=3, workers=2)
+    pairs = [(model, backend) for model in ("phi", "gemma")]
+    for _ in range(2):
+        with ThreadPoolExecutor(2) as pool:
+            futures = engine._submit(pool, pairs, "task")
+            assert len(futures) == 6
+            assert all(f.result(timeout=10) for f in futures)
+    assert len(calls) == 6 and set(calls[:2]) == {"phi", "gemma"}
+    rows = [json.loads(line) for line in cache_path.read_text().splitlines()]
+    expected_keys = {backend.cache.key("ollama", model, 0.7, 4000, index, "task")
+                     for model in ("phi", "gemma") for index in range(3)}
+    assert {row["k"] for row in rows} == expected_keys
+
+
+def test_council_keeps_both_reservations_until_running_samples_finish(scheduler_environment):
+    started, release, verified = threading.Event(), threading.Event(), threading.Event()
+
+    class Model(Backend):
+        name = "ollama"
+
+        def _one(self, model, *_):
+            if model == "best":
+                return "def solve():\n    return 0"
+            if model == "gemma":
+                started.set()
+                release.wait(timeout=5)
+            else:
+                assert started.wait(timeout=5)
+            return "def solve():\n    return 1"
+
+    class Verifier:
+        def verify(self, text):
+            if "return 1" in text:
+                verified.set()
+                return True
+            return False
+
+    scheduler = LocalScheduler("http://localhost:11434", wait_seconds=0)
+    with ThreadPoolExecutor(1) as pool:
+        future = pool.submit(Engine(Model(), panel=["best", "phi", "gemma"], best="best",
+                                    k=1, workers=2, local_scheduler=scheduler).solve, "task", Verifier())
+        try:
+            assert verified.wait(timeout=5) and not future.done()
+            with scheduler.reserve(["third"]) as selected:
+                assert selected is None
+        finally:
+            release.set()
+        assert future.result(timeout=5).verified
+
+
+def test_cli_full_panel_refusal_retains_routed_member(
+        scheduler_environment, monkeypatch, tmp_path, capsys):
+    from llmjury import cli, backends, verifiers
+    from llmjury.engine import Result
+
+    task, cases = tmp_path / "task.txt", tmp_path / "cases.json"
+    task.write_text("implement solve")
+    cases.write_text('[{"args": [], "expected": 1}]')
+    monkeypatch.setattr(memguard, "check", lambda *_args, **_: memguard.Report(False))
+    monkeypatch.setattr(backends, "baked_system_warnings", lambda *_: [])
+    monkeypatch.setattr(verifiers, "sandbox_note", lambda: ("container", ""))
+    monkeypatch.setattr(cli, "_refuse_root", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["llmjury", "solve", "--task", str(task),
+        "--cases", str(cases), "--entry-point", "solve", "--backend", "ollama",
+        "--models", "qwen,phi", "--brain", "--brain-model", "brain",
+        "--mem-check", "refuse", "--json"])
+    monkeypatch.setattr(os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+
+    class CaptureEngine:
+        def __init__(self, backend, **settings):
+            assert settings["use_panel"] and settings["panel"] == ["brain"]
+            assert settings["best"] == "brain" and "brain" in settings["route"]
+
+        def solve(self, *_):
+            return Result("def solve():\n    return 1", None, True, "brain", "single", 1)
+
+    monkeypatch.setattr(cli, "Engine", CaptureEngine)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+    assert exit_info.value.code == 0
+    assert json.loads(capsys.readouterr().out)["verified"]
+
+
+@pytest.mark.parametrize("explicit_panel", [True, False])
+def test_cli_subset_diagnostic_keeps_members_for_later_stages(
+        scheduler_environment, monkeypatch, tmp_path, explicit_panel):
+    from llmjury import cli, backends, verifiers, panels
+    from llmjury.engine import Result
+
+    task, cases = tmp_path / "task.txt", tmp_path / "cases.json"
+    task.write_text("implement solve")
+    cases.write_text('[{"args": [], "expected": 1}]')
+    monkeypatch.setattr(memguard, "check", lambda models, **_: memguard.Report(
+        len(set(models)) == 1))
+    monkeypatch.setattr(backends, "baked_system_warnings", lambda *_: [])
+    monkeypatch.setattr(verifiers, "sandbox_note", lambda: ("container", ""))
+    monkeypatch.setattr(cli, "_refuse_root", lambda: None)
+    arguments = ["llmjury", "solve", "--task", str(task), "--cases", str(cases),
+                 "--entry-point", "solve", "--backend", "ollama", "--mem-check", "refuse"]
+    if explicit_panel:
+        arguments += ["--models", "qwen,phi"]
+    monkeypatch.setattr(sys, "argv", arguments)
+    monkeypatch.setattr(os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+
+    class CaptureEngine:
+        def __init__(self, backend, **settings):
+            assert settings["use_panel"]
+            configured = settings["panel"] or panels.LOCAL_PANEL
+            assert configured == (["qwen", "phi"] if explicit_panel else panels.LOCAL_PANEL)
+
+        def solve(self, *_):
+            return Result("def solve():\n    return 1", None, True, "member", "council", 1)
+
+    monkeypatch.setattr(cli, "Engine", CaptureEngine)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+    assert exit_info.value.code == 0
