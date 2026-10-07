@@ -237,6 +237,32 @@ Use `--scope project` to install the Claude skill in only the current repository
 
 ## Codex Fusion
 
+### Concurrent independent local tasks
+
+`llmjury solve --backend ollama` now shares the host compute lock with other
+scheduled solves. Up to two tasks can generate local candidates concurrently.
+When the preferred model is busy, a new task starts with an idle member of its
+configured panel. For the Mac launcher, those members are Qwen 3.5 4B and
+Phi-4 Mini 3.8B. An explicit `--best` keeps the requested first model.
+
+Each task keeps its own oracle, local best-of-k samples, and ordered frontier
+fallback. A failed local candidate lets that task try another panel member;
+only failed or refused local work reaches the configured frontier. This uses
+model diversity across independent tasks without spending frontier calls on
+answers that already pass verification.
+
+The scheduler atomically reserves model lanes across processes and checks the
+combined reserved models, largest context, current residency, and host memory
+before generation. This admission is mandatory even with `--mem-check off`,
+which controls only the earlier full-panel diagnostic. Busy lanes wait up to
+30 seconds, then allow configured fallback. Memory refusal allows fallback;
+exclusive 27B ownership stops all providers. Legacy reviews, benchmarks, and
+exclusive sessions still take the original exclusive compute lock.
+
+Reservations contain model names and resource settings, not task text. Kernel
+file locks release them after a crash. A task retains its reservation until its
+running samples finish, including after it finds a verified answer.
+
 The Codex app's default jury workflow uses local models while they can satisfy the
 verifier, then uses the authenticated Codex CLI:
 

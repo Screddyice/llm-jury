@@ -167,8 +167,8 @@ def host_memory():
 
 
 @contextmanager
-def local_compute_lock():
-    """Serialize cooperating councils and background reviews on this host."""
+def local_compute_lock(shared=False):
+    """Share scheduled solves; exclude legacy reviews, benchmarks, and 27B jobs."""
     try:
         import fcntl
     except ImportError as error:
@@ -178,7 +178,8 @@ def local_compute_lock():
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+            fcntl.flock(lock, mode | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError("another local council or review owns compute; retry after it finishes") from error
         try:

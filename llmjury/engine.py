@@ -13,7 +13,7 @@ ladder stays strictly sequential; that's the cost model.
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 
 from .verifiers import extract_code
@@ -61,7 +61,8 @@ class Engine:
     def __init__(self, backend, panel=None, best=None, prompt_template=CODE_PROMPT,
                  k=4, max_tokens=4000, temperature=0.7, frontier=None, frontier_backend=None,
                  route=None, frontier_route=None, workers=None, frontier_max_tokens=None,
-                 use_panel=True, frontier_k=None, frontier_defaults=None):
+                 use_panel=True, frontier_k=None, frontier_defaults=None,
+                 local_scheduler=None, rebalance=True):
         self.backend = backend
         b, p = default_panel(backend.name)
         self.best = best or b
@@ -101,6 +102,8 @@ class Engine:
         # sized so an entire council stage (every panelist x k samples) can be
         # in flight at once.
         self.workers = workers or min(16, max(4, self.k * max(1, len(self.panel))))
+        self.local_scheduler = local_scheduler
+        self.rebalance = rebalance
 
     def _submit(self, ex, pairs, prompt, max_tokens=None, samples=None):
         """Queue stage samples for each (model, backend); return {future: model}.
@@ -142,18 +145,57 @@ class Engine:
             return self.frontier_route.get(m, self.frontier_backend)
 
         def run_stage(ex, pairs, stage, max_tokens=None, samples=None):
-            for fut, model in _in_completion_order(
-                    self._submit(ex, pairs, prompt, max_tokens, samples)):
-                out = fut.result()
-                for text in ([out] if isinstance(out, str) else out):
-                    seen.append((model, text))
-                    if verifier.verify(text):
-                        return Result(extract_code(text), text, True, model, stage, len(seen))
+            if self.local_scheduler:
+                self.local_scheduler.require_available()
+            futures = self._submit(ex, pairs, prompt, max_tokens, samples)
+            try:
+                for fut, model in _in_completion_order(futures):
+                    out = fut.result()
+                    for text in ([out] if isinstance(out, str) else out):
+                        seen.append((model, text))
+                        if verifier.verify(text):
+                            return Result(extract_code(text), text, True, model, stage, len(seen))
+            finally:
+                if self.local_scheduler:
+                    # Keep the reservation until running samples finish. A winning
+                    # candidate cannot release memory still used by other decodes.
+                    for future in futures:
+                        future.cancel()
+                    wait(futures)
+            return None
+
+        def scheduled_local(ex):
+            remaining = list(dict.fromkeys([self.best, *self.panel]))
+            first = True
+            while remaining:
+                choices = remaining if self.rebalance or not first else [self.best]
+                # Routed panelists have a separate provider and keep their own policy.
+                if backend_for(choices[0]).name != "ollama":
+                    selected = choices[0]
+                    r = run_stage(ex, [(selected, backend_for(selected))],
+                                  "single" if first else "council")
+                else:
+                    choices = [m for m in choices if backend_for(m).name == "ollama"]
+                    with self.local_scheduler.reserve(choices, preferred=choices[0]) as selected:
+                        if selected is None:
+                            return None
+                        r = run_stage(ex, [(selected, backend_for(selected))],
+                                      "single" if first else "council")
+                if r:
+                    return r
+                remaining.remove(selected)
+                if not escalate:
+                    return None
+                first = False
             return None
 
         ex = ThreadPoolExecutor(max_workers=self.workers)
         try:
-            if self.use_panel:
+            if self.use_panel and self.local_scheduler:
+                r = scheduled_local(ex)
+                if r:
+                    return r
+            elif self.use_panel:
                 # Stage 1: single best model, best-of-k.
                 r = run_stage(ex, [(self.best, backend_for(self.best))], "single")
                 if r:
