@@ -251,6 +251,21 @@ only failed or refused local work reaches the configured frontier. This uses
 model diversity across independent tasks without spending frontier calls on
 answers that already pass verification.
 
+Local and OpenRouter-backed solves use the same generate, verify, select, and
+escalate contract. After the first model fails, the local scheduler admits up
+to two complementary panel members for one council stage. They receive the
+same task and oracle, and the first verified candidate wins. If only one fits,
+the remaining members run in later admitted stages. Explicit members routed
+to another backend remain in the council after a local memory refusal.
+Built-in backends interleave sample requests across models so `--jobs 2`
+can start both council members before exhausting one member's best-of-k budget.
+
+This preserves LLM-Jury's existing OpenRouter backend behavior. The separate
+OpenRouter Fusion Router offers panel deliberation followed by analyst input
+to a final answer; LLM-Jury accepts code through its deterministic verifier.
+Following the council contract does not enable paid OpenRouter generation in
+the Mac's local-first Codex workflow.
+
 The scheduler atomically reserves model lanes across processes and checks the
 combined reserved models, largest context, current residency, and host memory
 before generation. This admission is mandatory even with `--mem-check off`,

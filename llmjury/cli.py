@@ -329,7 +329,13 @@ def _cmd_solve(a):
                     #                    Not selectable today (--frontier-backend is
                     #                    openrouter/codex); kept so that adding
                     #                    it cannot silently re-open the hole.
-                    if frontier and not report.terminal and a.frontier_backend != "ollama":
+                    routed = [model for model in (panel or []) if model in route]
+                    if routed and not report.terminal:
+                        panel, best = routed, routed[0]
+                        sys.stderr.write(
+                            "[llmjury] local panel refused; retaining explicitly routed "
+                            "council members: " + ", ".join(routed) + "\n")
+                    elif frontier and not report.terminal and a.frontier_backend != "ollama":
                         use_panel = False
                         frontier_providers = (
                             f"{a.frontier_backend}, then {rescue_backend}"

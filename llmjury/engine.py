@@ -116,15 +116,22 @@ class Engine:
         mt = max_tokens or self.max_tokens
         n = self.k if samples is None else samples
         futs = {}
-        for model, backend in pairs:
-            if hasattr(backend, "submit"):
-                for f in backend.submit(ex, model, prompt, n=n,
-                                        temperature=self.temperature,
-                                        max_tokens=mt):
-                    futs[f] = model
-            else:
-                futs[ex.submit(backend.complete, model, prompt, n,
-                               self.temperature, mt)] = model
+        for index in range(n):
+            for model, backend in pairs:
+                if hasattr(backend, "submit_sample"):
+                    future = backend.submit_sample(ex, model, prompt, index,
+                                                   self.temperature, mt)
+                    futs[future] = model
+                elif index == 0:
+                    # Preserve compatibility with third-party batch backends.
+                    if hasattr(backend, "submit"):
+                        for future in backend.submit(ex, model, prompt, n=n,
+                                                     temperature=self.temperature,
+                                                     max_tokens=mt):
+                            futs[future] = model
+                    else:
+                        futs[ex.submit(backend.complete, model, prompt, n,
+                                       self.temperature, mt)] = model
         return futs
 
     def solve(self, task, verifier, escalate=True):
@@ -168,27 +175,43 @@ class Engine:
 
         def scheduled_local(ex):
             remaining = list(dict.fromkeys([self.best, *self.panel]))
-            first = True
-            while remaining:
-                choices = remaining if self.rebalance or not first else [self.best]
-                # Routed panelists have a separate provider and keep their own policy.
-                if backend_for(choices[0]).name != "ollama":
-                    selected = choices[0]
-                    r = run_stage(ex, [(selected, backend_for(selected))],
-                                  "single" if first else "council")
-                else:
-                    choices = [m for m in choices if backend_for(m).name == "ollama"]
-                    with self.local_scheduler.reserve(choices, preferred=choices[0]) as selected:
-                        if selected is None:
-                            return None
-                        r = run_stage(ex, [(selected, backend_for(selected))],
-                                      "single" if first else "council")
-                if r:
-                    return r
+            selected = None
+            if backend_for(self.best).name != "ollama":
+                selected = self.best
+                r = run_stage(ex, [(selected, backend_for(selected))], "single")
+            else:
+                choices = [m for m in remaining if backend_for(m).name == "ollama"]
+                if not self.rebalance:
+                    choices = [self.best]
+                with self.local_scheduler.reserve(choices, preferred=self.best) as selected:
+                    r = (run_stage(ex, [(selected, backend_for(selected))], "single")
+                         if selected is not None else None)
+            if r or not escalate:
+                return r
+            if selected is not None:
                 remaining.remove(selected)
-                if not escalate:
-                    return None
-                first = False
+            elif not self.rebalance:
+                # A pinned first model cannot be replaced by another local
+                # lane merely because it is busy or refused. Routed council
+                # members and the configured frontier retain their own policy.
+                remaining = [m for m in remaining if backend_for(m).name != "ollama"]
+
+            # Match the cloud council stage: complementary panelists share one
+            # prompt and oracle, with first verified completion winning. Local
+            # admission bounds concurrent residency; explicit routed members
+            # still participate when no local model fits.
+            while remaining:
+                local = [m for m in remaining if backend_for(m).name == "ollama"]
+                routed = [m for m in remaining if backend_for(m).name != "ollama"]
+                with self.local_scheduler.reserve_many(local) as admitted:
+                    models = admitted + routed
+                    if models:
+                        r = run_stage(ex, [(m, backend_for(m)) for m in models], "council")
+                        if r:
+                            return r
+                if not admitted:
+                    break
+                remaining = [m for m in remaining if m not in models]
             return None
 
         ex = ThreadPoolExecutor(max_workers=self.workers)
