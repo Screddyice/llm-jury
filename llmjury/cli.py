@@ -183,10 +183,17 @@ def _require_compute_available():
             "remain disabled until the 27B route releases the host."
 )
 
-# macOS and Ollama already own memory pressure and model residency. The former
-# byte-budget preflight remains available as an explicit diagnostic/opt-in, but
-# it must not block the normal local path on unified-memory Macs.
+# The full-panel diagnostic stays opt-in on macOS. The scheduler checks the
+# selected model and concurrent reservations before any local generation;
+# macOS and Ollama continue to manage pressure and model residency.
 DEFAULT_MEM_CHECK = "off" if platform.system() == "Darwin" else "refuse"
+
+
+def _local_scheduler(backend, num_ctx):
+    if backend.name != "ollama":
+        return None
+    from .scheduler import LocalScheduler
+    return LocalScheduler(backend.host, num_ctx)
 
 
 def cmd_solve(a):
@@ -195,7 +202,7 @@ def cmd_solve(a):
     if getattr(a, "backend", None) == "ollama":
         from .memguard import local_compute_lock
         try:
-            with local_compute_lock():
+            with local_compute_lock(shared=True):
                 return _cmd_solve(a)
         except (RuntimeError, OSError) as error:
             sys.exit(f"error: local compute unavailable: {error}")
@@ -352,7 +359,9 @@ def _cmd_solve(a):
                frontier=frontier, frontier_backend=fb, route=route,
                frontier_route=frontier_route,
                use_panel=use_panel, frontier_k=getattr(a, "frontier_k", None),
-               frontier_defaults={"codex": 1}).solve(task, verifier)
+               frontier_defaults={"codex": 1},
+               local_scheduler=_local_scheduler(backend, a.num_ctx),
+               rebalance=not bool(a.best)).solve(task, verifier)
 
     if a.json:
         import dataclasses

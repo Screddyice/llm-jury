@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 3 -->"
+MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 4 -->"
 MANAGED_PREFIX = "<!-- managed by llmjury install-codex; version:"
 LEGACY_MANAGED_DIGESTS = {
     "a2e067b1e03119e0ac9ea267b86db3f11e2a13c0a14a9cfc2f463011b3109a50",
@@ -18,7 +18,7 @@ SKILL = """\
 name: llm-jury-orchestrate
 description: Use LLM-Jury inside the Codex app for verifier-shaped code tasks, local-first fusion, and optional Claude planning.
 ---
-<!-- managed by llmjury install-codex; version: 3 -->
+<!-- managed by llmjury install-codex; version: 4 -->
 
 # LLM-Jury in the Codex app
 
@@ -91,6 +91,26 @@ to make a local run appear successful. Ordinary memory pressure may use the conf
 Codex frontier; exclusive ownership stops the entire jury run.
 Jury Ollama requests retain models for 30 seconds after generation, then let the
 server unload them; this does not change retention for other Ollama clients.
+
+## Independent concurrent tasks
+
+When two independent code units have separate trustworthy oracles, launch their
+`llmjury solve --backend ollama` commands concurrently. Keep each task file,
+verifier, JSON result, and integration step separate. Use the terminal tool's
+parallel execution capability; do not invent subagents or ask models to vote.
+
+The local scheduler admits at most two tasks to idle model lanes. The host
+launcher selects Qwen 3.5 4B and Phi-4 Mini 3.8B; omit `--best` to let an idle
+member start the second task. An explicit `--best` preserves that preference.
+Each task samples locally, tries another panel member on verification failure,
+and uses its configured ordered frontier only after local work fails or cannot
+be admitted. The scheduler checks aggregate reservations and current memory
+before generation, even when the earlier full-panel diagnostic is off.
+
+Do not split a dependent sequence into concurrent tasks or give separate tasks
+the same output file. Busy lanes wait up to 30 seconds before configured
+fallback. Memory refusal allows remote fallback; exclusive 27B ownership stops
+all providers. Report which model and stage passed each task's own oracle.
 
 5. Accept output only when the command exits with status 0 and the JSON contains
    `"verified": true`. Do not integrate an unverified answer. Inspect verified code
