@@ -1,6 +1,6 @@
 """Spend ledger: llm-jury records what its metered backends cost.
 
-The consumer is backdoor's weekly model-economics report, which reads this
+The consumer is weekly model-economics report, which reads this
 ledger instead of OPENROUTER_API_KEY. Recording must never be able to fail a
 solve — a billing side-effect that breaks the answer is worse than no ledger.
 """

@@ -17,7 +17,6 @@ class MemoryAdmissionTests(unittest.TestCase):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         for name, value in {
-            "router_failover": (False, ""),
             "exclusive_compute": (False, ""),
             "simulator_stack": (False, 0),
             "total_ram_bytes": 36 * memguard.GB,

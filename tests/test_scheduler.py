@@ -308,7 +308,7 @@ def test_group_reservation_counts_both_lanes_and_releases_after_exception(schedu
 
 def test_group_admission_terminal_refusal_releases_partial_reservation(scheduler_environment, monkeypatch):
     def check(models, **_):
-        return memguard.Report(len(models) == 1, router=len(models) > 1, router_reason="27B lease")
+        return memguard.Report(len(models) == 1, exclusive=len(models) > 1, exclusive_reason="exclusive lease")
 
     monkeypatch.setattr(memguard, "check", check)
     scheduler = LocalScheduler("http://localhost:11434", wait_seconds=0)

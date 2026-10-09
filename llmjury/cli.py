@@ -342,7 +342,7 @@ def _cmd_solve(a):
                     # no memory — perfectly usable. Drop the panel and escalate
                     # rather than killing a run that still has a safe path to a
                     # verified answer. Two refusals are not like that:
-                    #   report.terminal  Backdoor assigned all model compute to Qwen,
+                    #   report.terminal  an exclusive local session assigned all model compute to Qwen,
                     #                    so local and frontier calls must both stop
                     #   ollama frontier  would load the very models just refused.
                     #                    Not selectable today (--frontier-backend is

@@ -76,24 +76,10 @@ DESKTOP_RESERVE_BYTES = 4 * GB
 # council on top of that is exactly the co-residency that panics a machine.
 SIMULATOR_OVERRIDE_ENV = "LLMJURY_ALLOW_SIMULATOR"
 
-# Backdoor's hybrid router (the :8083 proxy that fronts Claude Code) publishes its
-# circuit-breaker state here. An OPEN breaker means the router has committed the
-# local Ollama server to keeping in-flight sessions alive -- the same server and
-# the same VRAM a council needs, so running one anyway is a fight over ~13 GB of
-# qwen tier plus ~23 GB of panel on a 36 GB host.
-#
-# This ownership is terminal even when a remote provider remains reachable. The
-# 27B route gets all model compute, so the council and every frontier stand down.
-ROUTER_STATE_PATH = os.environ.get(
-    "LLMJURY_ROUTER_STATE") or os.path.expanduser("~/.backdoor/failover-state.json")
-
-# Backdoor publishes one short-lived file per process and client route before it
-# asks Ollama to load the exclusive 27B model. The lease closes the race between
-# request admission and `/api/ps` showing the newly resident model. Residency is
-# checked as a second source of truth after the lease expires.
+# Shared lease state for exclusive local model sessions.
 COMPUTE_LEASE_DIR = os.environ.get(
     "LLMJURY_COMPUTE_LEASE_DIR"
-) or os.path.expanduser("~/.backdoor/compute-leases")
+) or os.path.expanduser("~/.cache/llmjury/compute-leases")
 EXCLUSIVE_MODELS = {"qwen3.8:27b-obliterated"}
 DEFAULT_OLLAMA_HOST = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
 if not DEFAULT_OLLAMA_HOST.startswith("http"):
@@ -271,32 +257,6 @@ def _pid_alive(pid):
     return True
 
 
-def router_failover(path=None):
-    """Is backdoor's router currently serving traffic from the local GPU?
-
-    Returns ``(active, reason)``. A missing, unreadable, or unparseable file
-    means "not failing over" -- which is also the state of a host with no router
-    installed at all. Fail open, same policy as the rest of this module.
-
-    A flag whose writer is gone is treated as inactive. The router clears the
-    flag on recovery, but a router *killed* while OPEN would leave it set
-    forever, and permanently disabling the council is a worse failure than the
-    brief race this avoids.
-    """
-    try:
-        with open(path or ROUTER_STATE_PATH, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return False, ""
-    if not isinstance(data, dict) or not data.get("failover_active"):
-        return False, ""
-    pid = data.get("pid")
-    if isinstance(pid, int) and not _pid_alive(pid):
-        return False, ""
-    reason = data.get("reason")
-    return True, reason if isinstance(reason, str) else ""
-
-
 def _get_json(url, timeout=5):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
@@ -372,7 +332,7 @@ def exclusive_compute(host=None):
             if isinstance(pid, int) and not _pid_alive(pid):
                 continue
             source = data.get("source")
-            source = source if isinstance(source, str) and source else "backdoor"
+            source = source if isinstance(source, str) and source else "local-session"
             return True, f"{source} owns {data['model']}"
     except OSError:
         pass
@@ -382,10 +342,6 @@ def exclusive_compute(host=None):
         if _exclusive_model(model):
             return True, f"{model} is resident in Ollama"
 
-    failing_over, reason = router_failover()
-    if failing_over:
-        because = f" ({reason})" if reason else ""
-        return True, f"backdoor failover is active{because}"
     return False, ""
 
 
@@ -407,7 +363,7 @@ class Report:
 
     def __init__(self, ok, budget=0, projected=0, resident=0, per_model=None,
                  unknown=None, skipped=None, simulator=False, simulator_rss=0,
-                 router=False, router_reason="", pressure_reason=""):
+                 exclusive=False, exclusive_reason="", pressure_reason=""):
         self.ok = ok
         self.budget = budget
         self.projected = projected
@@ -417,14 +373,14 @@ class Report:
         self.skipped = skipped
         self.simulator = simulator
         self.simulator_rss = simulator_rss
-        self.router = router
-        self.router_reason = router_reason
+        self.exclusive = exclusive
+        self.exclusive_reason = exclusive_reason
         self.pressure_reason = pressure_reason
 
     @property
     def terminal(self):
         """Must the whole jury stop instead of escalating to a frontier?"""
-        return self.router
+        return self.exclusive
 
     @property
     def offline(self):
@@ -435,8 +391,8 @@ class Report:
         """Operator-facing explanation, with the arithmetic that drove the verdict."""
         if self.pressure_reason:
             return self.pressure_reason
-        if self.router:
-            because = f" ({self.router_reason})" if self.router_reason else ""
+        if self.exclusive:
+            because = f" ({self.exclusive_reason})" if self.exclusive_reason else ""
             return (f"exclusive ownership of local model compute is active{because}; "
                     "the local council and every frontier provider are disabled "
                     "while that exclusive ownership is active")
@@ -460,9 +416,8 @@ class Report:
     def hint(self):
         if self.pressure_reason:
             return "wait for memory pressure to clear or use a remote backend"
-        if self.router:
-            return ("wait for the router to release exclusive model compute; "
-                    f"inspect {ROUTER_STATE_PATH}")
+        if self.exclusive:
+            return ("wait for the exclusive local model session to release compute")
         if self.simulator:
             return ("shut the simulator down first: `xcrun simctl shutdown all` "
                     "(it reboots in seconds when next needed); or use a cloud "
@@ -487,15 +442,9 @@ def check(models, host="http://localhost:11434", num_ctx=8192, parallel=None,
     Returns a :class:`Report`. Unknown memory/model costs refuse local admission;
     remote escalation remains possible unless exclusive ownership is active.
     """
-    # Router ownership is an absolute allocation policy, not a connectivity
-    # inference. It blocks local and frontier model calls even if cloud remains
-    # reachable, so there is no override here.
-    failing_over, reason = router_failover()
-    if failing_over:
-        return Report(False, router=True, router_reason=reason)
     exclusive, reason = exclusive_compute(host)
     if exclusive:
-        return Report(False, router=True, router_reason=reason)
+        return Report(False, exclusive=True, exclusive_reason=reason)
 
     # A booted iOS Simulator excludes a local panel outright, before any RAM
     # arithmetic: the CoreSimulator stack is hundreds of processes whose resident
