@@ -1264,25 +1264,20 @@ MEASURED = [
 HOST_36GB = 38654705664          # hw.memsize on the machine that panicked
 
 
-def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0),
-                 router=(False, "")):
+def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0)):
     """Point memguard at a synthetic host. Returns a restore callable.
 
-    Also stubs the simulator and router probes: without that, every test here
-    would inherit the REAL machine's state, and a booted iPhone on the
-    developer's desk — or a backdoor router mid-failover — would fail the whole
-    suite.
+    Also stubs the simulator probe so tests never inherit the real machine state.
     """
     from llmjury import memguard
     saved = (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
-             memguard.simulator_stack, memguard.router_failover, memguard.host_memory,
+             memguard.simulator_stack, memguard.host_memory,
              memguard.prompt_cache_bytes, memguard.exclusive_compute, memguard.mem_fraction)
     loaded = loaded or {}
     memguard.disk_sizes = lambda host: {t: int(g * 1e9) for t, g in sizes_gb.items()}
     memguard.loaded_bytes = lambda host: (sum(loaded.values()), dict(loaded))
     memguard.total_ram_bytes = lambda: monkeypatched
     memguard.simulator_stack = lambda: simulator
-    memguard.router_failover = lambda path=None: router
     memguard.host_memory = lambda: (monkeypatched, 1)
     memguard.prompt_cache_bytes = lambda: 0
     memguard.exclusive_compute = lambda host=None: (False, "")
@@ -1290,7 +1285,7 @@ def _fake_ollama(monkeypatched, sizes_gb, loaded=None, simulator=(False, 0),
 
     def restore():
         (memguard.disk_sizes, memguard.loaded_bytes, memguard.total_ram_bytes,
-         memguard.simulator_stack, memguard.router_failover, memguard.host_memory,
+         memguard.simulator_stack, memguard.host_memory,
          memguard.prompt_cache_bytes, memguard.exclusive_compute, memguard.mem_fraction) = saved
     return restore
 
@@ -1556,33 +1551,6 @@ def test_memguard_simulator_probe_fails_open():
         sp.run = saved
 
 
-# ── GPU contention with backdoor's router ────────────────────────────────────
-# The router fails over to local Ollama only when the host is OFFLINE. That makes
-# it the one refusal where escalating to the cloud cannot help either, so it is
-# the one refusal that stops the run outright.
-
-
-def _router_state(tmpdir, **payload):
-    path = Path(tmpdir) / "failover-state.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return str(path)
-
-
-def test_router_failover_refuses_and_marks_the_run_terminal():
-    from llmjury import memguard
-    restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
-                           router=(True, "ConnectError"))
-    try:
-        report = memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2)
-        assert not report.ok
-        assert report.router and report.terminal, (
-            "a router refusal must be terminal so the CLI does not escalate "
-            "to a cloud ladder while Qwen owns compute")
-        assert "exclusive ownership" in report.message()
-    finally:
-        restore()
-
-
 def test_ram_and_simulator_refusals_are_not_terminal():
     """Only exclusive router ownership blocks every frontier."""
     from llmjury import memguard
@@ -1601,65 +1569,17 @@ def test_ram_and_simulator_refusals_are_not_terminal():
         restore()
 
 
-def test_router_state_missing_or_junk_reads_as_inactive():
-    """No router installed, or a half-written file, must not disable the council."""
-    from llmjury import memguard
-    with tempfile.TemporaryDirectory() as td:
-        assert memguard.router_failover(str(Path(td) / "nope.json")) == (False, "")
-        junk = Path(td) / "junk.json"
-        junk.write_text("{not json", encoding="utf-8")
-        assert memguard.router_failover(str(junk)) == (False, "")
-        inactive = _router_state(td, failover_active=False, pid=os.getpid())
-        assert memguard.router_failover(inactive) == (False, "")
-
-
-def test_router_state_is_read_when_active():
-    from llmjury import memguard
-    with tempfile.TemporaryDirectory() as td:
-        path = _router_state(td, failover_active=True, reason="ConnectError",
-                             pid=os.getpid())
-        assert memguard.router_failover(path) == (True, "ConnectError")
-
-
-def test_router_state_from_a_dead_writer_is_ignored():
-    """A router killed while OPEN would otherwise disable the council forever."""
-    from llmjury import memguard
-    with tempfile.TemporaryDirectory() as td:
-        # PID 2^22 is above the kernel maximum, so it cannot be a live process.
-        path = _router_state(td, failover_active=True, reason="ConnectError",
-                             pid=4194304)
-        assert memguard.router_failover(path) == (False, "")
-
-
-def test_router_override_cannot_bypass_exclusive_compute():
-    from llmjury import memguard
-    restore = _fake_ollama(HOST_36GB, {"phi4-mini:3.8b": 2.5},
-                           router=(True, "ConnectError"))
-    env = "LLMJURY_ALLOW_ROUTER_FAILOVER"
-    saved = os.environ.get(env)
-    try:
-        os.environ[env] = "1"
-        assert not memguard.check(["phi4-mini:3.8b"], num_ctx=8192, parallel=2).ok
-    finally:
-        if saved is None:
-            os.environ.pop(env, None)
-        else:
-            os.environ[env] = saved
-        restore()
-
-
 def test_exclusive_compute_detects_live_27b_lease_and_residency():
     from llmjury import memguard
 
     saved = (
         memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
-        memguard.router_failover, memguard.time.time,
+        memguard.time.time,
     )
     try:
         with tempfile.TemporaryDirectory() as td:
             memguard.COMPUTE_LEASE_DIR = td
             memguard.time.time = lambda: 1_000.0
-            memguard.router_failover = lambda path=None: (False, "")
             Path(td, "lease.json").write_text(json.dumps({
                 "active": True,
                 "model": "qwen3.8:27b-obliterated",
@@ -1683,7 +1603,7 @@ def test_exclusive_compute_detects_live_27b_lease_and_residency():
     finally:
         (
             memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
-            memguard.router_failover, memguard.time.time,
+            memguard.time.time,
         ) = saved
 
 
@@ -1692,14 +1612,13 @@ def test_exclusive_compute_ignores_expired_or_dead_leases():
 
     saved = (
         memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
-        memguard.router_failover, memguard.time.time,
+        memguard.time.time,
     )
     try:
         with tempfile.TemporaryDirectory() as td:
             memguard.COMPUTE_LEASE_DIR = td
             memguard.time.time = lambda: 2_000.0
             memguard.loaded_bytes = lambda host: (0, {})
-            memguard.router_failover = lambda path=None: (False, "")
             for name, payload in {
                 "expired.json": {
                     "active": True, "model": "qwen3.8:27b-obliterated",
@@ -1717,7 +1636,7 @@ def test_exclusive_compute_ignores_expired_or_dead_leases():
     finally:
         (
             memguard.COMPUTE_LEASE_DIR, memguard.loaded_bytes,
-            memguard.router_failover, memguard.time.time,
+            memguard.time.time,
         ) = saved
 
 

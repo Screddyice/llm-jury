@@ -543,10 +543,10 @@ and the error now points at `--frontier auto` as the way through.
 The Qwen launcher gives `qwen3.8:27b-obliterated` exclusive compute when a local Qwen,
 Claude, or Codex session selects it directly. The launcher preempts a cooperating local council or diff
 reviewer that holds the shared compute lock, then runs its normal pressure and RAM guards.
-It refuses to force-stop another Qwen or Ollama process. [Backdoor](https://github.com/Screddyice/backdoor)
+It refuses to force-stop another Qwen or Ollama process. the retired relay
 publishes circuit-breaker state to
-`~/.backdoor/failover-state.json` and writes short ownership leases under
-`~/.backdoor/compute-leases/` before local inference begins. LLM-Jury also checks
+the retired failover state file and writes short ownership leases under
+`~/.cache/llmjury/compute-leases/` before local inference begins. LLM-Jury also checks
 Ollama's `/api/ps` output as a residency backstop.
 
 ```
@@ -562,7 +562,7 @@ Ollama no longer reports the model resident before rerunning the jury. Ordinary 
 pressure can still skip local inference and use an explicitly configured remote frontier.
 The lease closes the gap before Ollama reports the model as resident. An
 expired lease or one from a dead router process is ignored. Missing or unreadable state
-fails open. Point the probes elsewhere with `LLMJURY_ROUTER_STATE` and
+fails open. Point the probes elsewhere with `(removed legacy state setting)` and
 `LLMJURY_COMPUTE_LEASE_DIR` when testing an isolated router.
 
 One wrinkle worth setting up: a launchd or systemd unit exports `OLLAMA_NUM_PARALLEL`
@@ -637,7 +637,7 @@ bracket it, so the figure deliberately under-claims rather than flatters. Overri
 
 This exists because llm-jury's frontier ladder spends real money in its own process,
 so none of it shows up in a Claude or Codex transcript and a usage report reading
-those transcripts cannot see it. The consumer (backdoor's weekly model-economics
+those transcripts cannot see it. The consumer (weekly model-economics
 report) reads this file rather than `OPENROUTER_API_KEY`: one system should not hold
 another's credential, and an account-wide total could not be attributed to a client
 anyway.
@@ -804,7 +804,7 @@ To reduce cache overhead, set `LLAMA_ARG_CACHE_RAM=1024` in the **Ollama server'
 environment. It limits saved prompt states to 1 GiB without shrinking the model
 or its context window. An operator must restart Ollama at an idle point before
 the new environment applies. Preserve a rollback copy of the service config;
-do not restart Backdoor. Verify the runner log says `limits: 1024.000 MiB` before
+do not restart retired services. Verify the runner log says `limits: 1024.000 MiB` before
 setting `LLMJURY_PROMPT_CACHE_MIB=1024` in clients. Until then, clients reserve the
 full default 8 GiB. A saved plist alone is not proof of the active limit.
 
@@ -816,7 +816,7 @@ llmjury preflight --models qwen3.5:4b --num-ctx 24576
 
 It returns JSON and exits 0 only on admission, without inference or cloud calls. This is
 an opt-in diagnostic; normal macOS solves do not run this byte-budget gate.
-The check includes Backdoor's live-process leases and 27B residency. Exclusive
+The check includes live-process leases and 27B residency. Exclusive
 ownership blocks all jury providers; memory refusals can still use an explicitly
 configured remote frontier. `solve --backend ollama` and `reproduce --backend ollama` hold a nonblocking process
 lock at `~/.cache/llmjury/local-compute.lock`; cooperating background reviewers
