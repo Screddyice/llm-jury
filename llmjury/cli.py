@@ -468,7 +468,10 @@ def cmd_reproduce(a):
 
 def cmd_delegate(a):
     from .delegation import ClaudeDelegator, CodexDelegator, cross_delegate
+    from .review_hook import NESTED_ENV
     task = _read(a.task)
+    # The agents started here must not fire their own cross-review Stop hooks.
+    os.environ[NESTED_ENV] = "1"
     agents = {"codex": CodexDelegator, "claude": ClaudeDelegator}
     try:
         executor = agents[a.agent](timeout=a.timeout)
@@ -502,6 +505,11 @@ def cmd_delegate(a):
             for finding in review.findings:
                 print("  - " + finding)
     sys.exit(0 if result.status == "completed" and result.returncode == 0 and approved else 1)
+
+
+def cmd_review_hook(a):
+    from .review_hook import main
+    sys.exit(main(a.host, timeout=a.timeout))
 
 
 def cmd_install_claude(a):
@@ -663,6 +671,14 @@ def main():
     d.add_argument("--json", action="store_true",
                    help="emit the structured handoff and reviews as JSON")
     d.set_defaults(func=cmd_delegate)
+
+    h = sub.add_parser(
+        "review-hook",
+        help="Stop hook: have the other agent review the code this agent just changed")
+    h.add_argument("--host", required=True, choices=["claude", "codex"],
+                   help="the agent whose Stop hook is calling this")
+    h.add_argument("--timeout", type=int, default=540, help="review timeout in seconds")
+    h.set_defaults(func=cmd_review_hook)
 
     i = sub.add_parser(
         "install-claude",
