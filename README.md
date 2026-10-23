@@ -262,6 +262,36 @@ and Bash available. It loads no MCP servers (`--strict-mcp-config`), because a l
 catalog alone can push the request past the context limit; `llmjury plan` now does the
 same. Reviews give Claude only Read, Glob and Grep, and run Codex with `--sandbox read-only`.
 
+### Automatic cross-review (Stop hook)
+
+`llmjury review-hook --host claude|codex` makes the cross-review automatic. Register it
+as a Stop hook in both agents. When a turn ends with changed files, the other agent
+reviews the diff. If it requests changes, the hook blocks the stop and the findings
+become the agent's next prompt:
+
+```json
+// ~/.claude/settings.json
+{"hooks": {"Stop": [{"hooks": [{"type": "command", "timeout": 600,
+  "command": "$HOME/.local/bin/llmjury review-hook --host claude"}]}]}}
+```
+
+```json
+// ~/.codex/hooks.json  (trust it once with /hooks)
+{"hooks": {"Stop": [{"hooks": [{"type": "command", "timeout": 600,
+  "command": "$HOME/.local/bin/llmjury review-hook --host codex"}]}]}}
+```
+
+- The first review in a session covers everything since `HEAD`. Each later one covers
+  only what changed since the previous review, tracked per session in
+  `~/.llmjury/review-hook/`.
+- There is one review per turn. The fix pass that follows a review (`stop_hook_active`)
+  is not reviewed again until the next turn.
+- The hook stays silent outside git, when nothing changed, in RS21 repositories (any
+  `origin` containing `rs21`), and inside agents started by `delegate` or by the hook
+  itself (`LLMJURY_NESTED`). Set `LLMJURY_CROSS_REVIEW=off` to pause it.
+- An approval, a missing CLI, a timeout, or any other error lets the agent stop
+  normally. The hook never breaks a session.
+
 Use `--scope project` to install the Claude skill in only the current repository, or
 `--force` to replace a locally modified installed copy. Both installers are idempotent.
 
