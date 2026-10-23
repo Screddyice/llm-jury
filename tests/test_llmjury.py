@@ -9,6 +9,8 @@ import shutil  # noqa: E402
 import subprocess  # noqa: E402
 import json  # noqa: E402
 import tempfile  # noqa: E402
+
+import pytest  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 from llmjury import verifiers  # noqa: E402
@@ -1907,3 +1909,76 @@ if __name__ == "__main__":
             print("ERROR", name, repr(e))
     print(f"\n{len(tests) - failed}/{len(tests)} passed")
     sys.exit(1 if failed else 0)
+
+
+class _Reviewer:
+    name = "Codex"
+
+    def __init__(self, verdict="changes_requested", findings=("a.py: off by one",)):
+        from llmjury.delegation import ReviewResult
+        self.result = ReviewResult(verdict, "s", list(findings), "Codex")
+        self.calls = []
+
+    def review(self, task, diff, workspace, **kw):
+        self.calls.append((task, diff))
+        return self.result
+
+
+def _hook_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "a.py").write_text("x = 1\n")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t",
+                    "-c", "commit.gpgsign=false", "commit", "-qm", "init"], check=True)
+    return repo
+
+
+@pytest.fixture
+def hook_env(tmp_path, monkeypatch):
+    import llmjury.review_hook as rh
+    monkeypatch.setattr(rh, "STATE_DIR", tmp_path / "state")
+    monkeypatch.delenv(rh.NESTED_ENV, raising=False)
+    monkeypatch.delenv(rh.OPT_OUT_ENV, raising=False)
+    return rh
+
+
+def test_review_hook_blocks_with_findings_then_skips_unchanged_tree(tmp_path, hook_env):
+    repo = _hook_repo(tmp_path)
+    (repo / "a.py").write_text("x = 2\n")
+    reviewer = _Reviewer()
+    event = {"session_id": "s1", "cwd": str(repo), "last_assistant_message": "bumped x"}
+    payload = hook_env.decide(event, "Claude", reviewer)
+    assert payload["decision"] == "block" and "a.py: off by one" in payload["reason"]
+    assert "+x = 2" in reviewer.calls[0][1] and "bumped x" in reviewer.calls[0][0]
+    hook_env.os.environ.pop(hook_env.NESTED_ENV, None)
+    # Same tree on the next stop: nothing new to review.
+    assert hook_env.decide(event, "Claude", reviewer) is None and len(reviewer.calls) == 1
+
+
+def test_review_hook_stays_quiet_when_it_should(tmp_path, hook_env, monkeypatch):
+    repo = _hook_repo(tmp_path)
+    (repo / "a.py").write_text("x = 3\n")
+    reviewer = _Reviewer()
+    base = {"session_id": "s2", "cwd": str(repo)}
+    assert hook_env.decide({**base, "stop_hook_active": True}, "Claude", reviewer) is None
+    monkeypatch.setenv(hook_env.NESTED_ENV, "1")
+    assert hook_env.decide(base, "Claude", reviewer) is None
+    monkeypatch.delenv(hook_env.NESTED_ENV)
+    monkeypatch.setenv(hook_env.OPT_OUT_ENV, "off")
+    assert hook_env.decide(base, "Claude", reviewer) is None
+    monkeypatch.delenv(hook_env.OPT_OUT_ENV)
+    assert hook_env.decide({"session_id": "s3", "cwd": str(tmp_path)}, "Claude", reviewer) is None
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "git@github.com:teamnebula-ai/rs21-nasa.git"], check=True)
+    assert hook_env.decide(base, "Claude", reviewer) is None
+    assert reviewer.calls == []
+
+
+def test_review_hook_approval_lets_agent_stop(tmp_path, hook_env):
+    repo = _hook_repo(tmp_path)
+    (repo / "b.py").write_text("y = 1\n")
+    reviewer = _Reviewer(verdict="approve", findings=())
+    assert hook_env.decide({"session_id": "s4", "cwd": str(repo)}, "Codex", reviewer) is None
+    assert len(reviewer.calls) == 1
