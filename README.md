@@ -168,7 +168,8 @@ Within Codex execution: testable Python unit → local Ollama jury → verifier 
   no dependency on a local model router or a custom `ANTHROPIC_BASE_URL`. (Sessions
   pinned to the official API, like the desktop app's, cannot resolve local-router
   model names; an unpinned agent sidesteps that entirely.)
-- **`llm-jury-delegate` skill** — has Claude pass a bounded execution brief to Codex:
+- **`llm-jury-delegate` skill** — has Claude pass a bounded execution brief to Codex,
+  then has a separate Claude review Codex's diff (see [Cross-delegation](#cross-delegation-and-review)):
 
 ```bash
 llmjury delegate --workspace "$PWD" --task - --json <<'TASK'
@@ -231,6 +232,35 @@ Python unit with functional tests or stdin/stdout cases. It does not ask local m
 to vote on architecture or other uncheckable work. This preserves the project's core
 rule: local model output becomes implementation input only after an independent
 verifier accepts it.
+
+### Cross-delegation and review
+
+A model tends to catch another model's mistakes more readily than its own. `delegate`
+works in both directions, and by default the agent that did not write the code reviews it:
+
+```bash
+llmjury delegate --agent codex  --workspace "$PWD" --task brief.md --json  # Codex writes, Claude reviews
+llmjury delegate --agent claude --workspace "$PWD" --task brief.md --json  # Claude writes, Codex reviews
+```
+
+1. The executor runs the task in the workspace and returns the handoff.
+2. llm-jury snapshots the workspace before and after the run, using a throwaway git
+   index so your staging area is untouched, and diffs only what the executor changed.
+3. The other agent reviews that diff read-only and returns `approve` or
+   `changes_requested` with concrete findings.
+4. On `changes_requested`, the findings go back to the executor for a fix pass, and
+   the reviewer checks the new diff. `--review-rounds N` sets the number of fix passes
+   (default 1). `--no-review` skips review entirely.
+
+The JSON adds `agent` and a `reviews` array, oldest first. The command exits 1 unless
+the handoff is `completed` and the last review approved. Review is skipped outside a
+git repository and for `--sandbox read-only` runs.
+
+Delegated Claude runs headless with `acceptEdits`, with its Bash sandbox confining writes
+to the workspace, unsandboxed commands refused, and only Read, Glob, Grep, Edit, Write
+and Bash available. It loads no MCP servers (`--strict-mcp-config`), because a large MCP
+catalog alone can push the request past the context limit; `llmjury plan` now does the
+same. Reviews give Claude only Read, Glob and Grep, and run Codex with `--sandbox read-only`.
 
 Use `--scope project` to install the Claude skill in only the current repository, or
 `--force` to replace a locally modified installed copy. Both installers are idempotent.

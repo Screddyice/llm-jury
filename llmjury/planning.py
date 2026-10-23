@@ -116,6 +116,8 @@ class ClaudePlanner:
             "--permission-mode", "plan",
             "--tools", "Read,Glob,Grep",
             "--no-session-persistence",
+            # A large user MCP catalog alone can exceed the context limit.
+            "--strict-mcp-config",
             "--effort", effort,
         ]
         if model:

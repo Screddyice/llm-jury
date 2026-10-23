@@ -467,17 +467,28 @@ def cmd_reproduce(a):
 
 
 def cmd_delegate(a):
-    from .delegation import CodexDelegator
+    from .delegation import ClaudeDelegator, CodexDelegator, cross_delegate
     task = _read(a.task)
+    agents = {"codex": CodexDelegator, "claude": ClaudeDelegator}
     try:
-        result = CodexDelegator(timeout=a.timeout).delegate(
-            task, a.workspace, model=a.model, effort=a.effort,
-            sandbox=a.sandbox, add_dirs=a.add_dir,
-        )
+        executor = agents[a.agent](timeout=a.timeout)
+        if a.review:
+            other = "claude" if a.agent == "codex" else "codex"
+            reviewer = agents[other](timeout=a.timeout)
+            result, reviews = cross_delegate(
+                executor, reviewer, task, a.workspace, rounds=a.review_rounds,
+                model=a.model, effort=a.effort, sandbox=a.sandbox, add_dirs=a.add_dir)
+        else:
+            result, reviews = executor.delegate(
+                task, a.workspace, model=a.model, effort=a.effort,
+                sandbox=a.sandbox, add_dirs=a.add_dir,
+            ), []
     except (RuntimeError, ValueError) as exc:
         sys.exit(f"error: {exc}")
+    approved = not reviews or reviews[-1].verdict == "approve"
     if a.json:
-        print(json.dumps(result.to_dict()))
+        print(json.dumps({**result.to_dict(), "agent": a.agent,
+                          "reviews": [r.to_dict() for r in reviews]}))
     else:
         print(f"[{result.status}] {result.summary}")
         if result.changed_files:
@@ -486,7 +497,11 @@ def cmd_delegate(a):
             print("check: " + check)
         for blocker in result.blockers:
             print("blocker: " + blocker, file=sys.stderr)
-    sys.exit(0 if result.status == "completed" and result.returncode == 0 else 1)
+        for review in reviews:
+            print(f"review ({review.reviewer}): {review.verdict}: {review.summary}")
+            for finding in review.findings:
+                print("  - " + finding)
+    sys.exit(0 if result.status == "completed" and result.returncode == 0 and approved else 1)
 
 
 def cmd_install_claude(a):
@@ -628,16 +643,25 @@ def main():
     r.set_defaults(func=cmd_reproduce)
 
     d = sub.add_parser(
-        "delegate", help="run a bounded Claude-planned task through a workspace-confined Codex agent")
+        "delegate",
+        help="run a bounded task through a workspace-confined Codex or Claude agent, "
+             "then have the other agent review the diff")
     d.add_argument("--task", required=True, help="task brief file, or - to read it from stdin")
-    d.add_argument("--workspace", default=".", help="repository/workspace Codex may access")
-    d.add_argument("--model", help="Codex model override (default: Codex configuration)")
+    d.add_argument("--agent", default="codex", choices=["codex", "claude"],
+                   help="agent that executes the task; the other one reviews it")
+    d.add_argument("--workspace", default=".", help="repository/workspace the agent may access")
+    d.add_argument("--model", help="executor model override (default: the agent's configuration)")
     d.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     d.add_argument("--sandbox", default="workspace-write", choices=["read-only", "workspace-write"])
     d.add_argument("--add-dir", action="append", default=[],
                    help="additional writable directory (repeatable; use sparingly)")
     d.add_argument("--timeout", type=int, default=1800, help="execution timeout in seconds")
-    d.add_argument("--json", action="store_true", help="emit the structured Codex handoff as JSON")
+    d.add_argument("--no-review", dest="review", action="store_false",
+                   help="skip the cross-model review of the resulting diff")
+    d.add_argument("--review-rounds", type=int, default=1,
+                   help="fix passes allowed after the reviewer requests changes (default 1)")
+    d.add_argument("--json", action="store_true",
+                   help="emit the structured handoff and reviews as JSON")
     d.set_defaults(func=cmd_delegate)
 
     i = sub.add_parser(
