@@ -17,7 +17,7 @@ def _panel_tags():
 SKILL = """\
 ---
 name: llm-jury-delegate
-description: "Delegate bounded implementation and execution tasks from Claude Code to Codex while keeping local Ollama models verifier-gated for testable code units."
+description: "Delegate bounded implementation and execution tasks from Claude Code to Codex, with Claude reviewing Codex's diff, while keeping local Ollama models verifier-gated for testable code units."
 ---
 
 # LLM-Jury Delegation
@@ -32,7 +32,10 @@ checked with tests, lint, builds, or a focused diff review.
 2. Produce a bounded execution brief with scope, constraints, acceptance criteria,
    relevant files, and required checks.
 3. Run `llmjury delegate --workspace "$PWD" --task - --json`, passing the brief on
-   stdin. Add `--model MODEL` only when a specific Codex model is required.
+   stdin. Add `--model MODEL` only when a specific Codex model is required. A
+   separate headless Claude reviews Codex's diff read-only, and Codex gets one pass to
+   fix the findings. Read the `reviews` array; exit status 1 with a final
+   `changes_requested` or `error` verdict means the work is not done.
 4. Inspect Codex's changed files and rerun or extend the important checks yourself.
 5. Resolve planning-level issues in Claude. Delegate another bounded execution pass
    only when concrete work remains.

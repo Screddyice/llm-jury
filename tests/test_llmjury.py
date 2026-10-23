@@ -1053,6 +1053,131 @@ def test_codex_delegator_nonzero_exit_overrides_completed_handoff():
     assert result.blockers == ["Codex exited with status 3."]
 
 
+def _claude_envelope(payload):
+    return json.dumps({"type": "result", "is_error": False, "structured_output": payload})
+
+
+def test_claude_delegator_confines_tools_and_drops_nested_marker(monkeypatch):
+    from llmjury.delegation import ClaudeDelegator
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    calls = []
+
+    def runner(cmd, **kw):
+        calls.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, _claude_envelope({
+            "status": "completed", "summary": "done", "changed_files": ["a.py"],
+            "tests": ["pytest (pass)"], "blockers": [],
+        }), "")
+
+    with tempfile.TemporaryDirectory() as workspace:
+        result = ClaudeDelegator(runner=runner).delegate("Fix the parser.", workspace)
+        cmd, kw = calls[0]
+        assert kw["cwd"] == str(Path(workspace).resolve())
+    assert result.status == "completed" and result.changed_files == ["a.py"]
+    assert cmd[:2] == ["claude", "--print"]
+    assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+    assert "--strict-mcp-config" in cmd and "--no-session-persistence" in cmd
+    settings = json.loads(cmd[cmd.index("--settings") + 1])
+    assert settings["sandbox"]["enabled"] and not settings["sandbox"]["allowUnsandboxedCommands"]
+    assert "CLAUDECODE" not in kw["env"]
+    assert "planned by Codex" in cmd[-1] and "Fix the parser." in cmd[-1]
+
+
+def test_claude_review_is_read_only_and_rejects_bad_verdict():
+    from llmjury.delegation import ClaudeDelegator
+
+    calls = []
+
+    def runner(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, _claude_envelope({
+            "verdict": "maybe", "summary": "?", "findings": [],
+        }), "")
+
+    with tempfile.TemporaryDirectory() as workspace:
+        review = ClaudeDelegator(runner=runner).review("task", "diff --git a b", workspace)
+    cmd = calls[0]
+    assert cmd[cmd.index("--tools") + 1] == "Read,Glob,Grep"
+    assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
+    assert "--settings" not in cmd
+    assert review.verdict == "error" and review.reviewer == "Claude"
+
+
+class _FakeAgent:
+    def __init__(self, name, handoffs=(), verdicts=()):
+        from llmjury.delegation import DelegationResult, ReviewResult
+        self.name = name
+        self.tasks, self.diffs = [], []
+        self._handoffs = [DelegationResult(s, "x", [], [], []) for s in handoffs]
+        self._verdicts = [ReviewResult(v, "y", ["a.py: off by one"], name) for v in verdicts]
+
+    def delegate(self, task, workspace, **kw):
+        self.tasks.append(task)
+        return self._handoffs.pop(0)
+
+    def review(self, task, diff, workspace, **kw):
+        self.diffs.append(diff)
+        return self._verdicts.pop(0)
+
+
+def _snapshots(*trees):
+    trees = list(trees)
+    return lambda workspace: trees.pop(0)
+
+
+def test_cross_delegate_sends_findings_back_to_executor_then_rereviews():
+    from llmjury.delegation import cross_delegate
+
+    executor = _FakeAgent("Claude", handoffs=["completed", "completed"])
+    reviewer = _FakeAgent("Codex", verdicts=["changes_requested", "approve"])
+    result, reviews = cross_delegate(
+        executor, reviewer, "Add the parser.", ".", rounds=1,
+        snapshot=_snapshots("t0", "t1", "t2"), diff=lambda w, a, b: f"{a}..{b}")
+    assert [r.verdict for r in reviews] == ["changes_requested", "approve"]
+    assert reviewer.diffs == ["t0..t1", "t0..t2"]
+    assert "a.py: off by one" in executor.tasks[1] and "Add the parser." in executor.tasks[1]
+    assert result.status == "completed"
+
+
+def test_cross_delegate_stops_after_rounds_and_skips_blocked_or_empty_work():
+    from llmjury.delegation import cross_delegate
+
+    executor = _FakeAgent("Codex", handoffs=["completed"])
+    reviewer = _FakeAgent("Claude", verdicts=["changes_requested"])
+    _, reviews = cross_delegate(executor, reviewer, "t", ".", rounds=0,
+                                snapshot=_snapshots("t0", "t1"), diff=lambda *a: "d")
+    assert len(reviews) == 1 and len(executor.tasks) == 1
+
+    blocked = _FakeAgent("Codex", handoffs=["blocked"])
+    _, reviews = cross_delegate(blocked, reviewer, "t", ".",
+                                snapshot=_snapshots("t0"), diff=lambda *a: "d")
+    assert reviews == []
+
+    unchanged = _FakeAgent("Codex", handoffs=["completed"])
+    _, reviews = cross_delegate(unchanged, reviewer, "t", ".",
+                                snapshot=_snapshots("t0", "t0"), diff=lambda *a: "")
+    assert reviews == []
+
+
+def test_snapshot_tree_diffs_untracked_files_without_touching_the_index():
+    from llmjury.delegation import snapshot_tree, tree_diff
+
+    with tempfile.TemporaryDirectory() as workspace:
+        subprocess.run(["git", "init", "-q", workspace], check=True)
+        Path(workspace, "a.py").write_text("x = 1\n")
+        before = snapshot_tree(workspace)
+        Path(workspace, "b.py").write_text("y = 2\n")
+        after = snapshot_tree(workspace)
+        change = tree_diff(workspace, before, after)
+        status = subprocess.run(["git", "-C", workspace, "status", "--porcelain"],
+                                capture_output=True, text=True).stdout
+    assert "b/b.py" in change and "+y = 2" in change and "a.py" not in change
+    assert status.startswith("??")  # nothing was staged in the real index
+    with tempfile.TemporaryDirectory() as plain:
+        assert snapshot_tree(plain) is None
+
+
 def test_validate_handoff_requires_exact_typed_schema():
     from llmjury.delegation import validate_handoff
 

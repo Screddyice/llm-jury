@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 5 -->"
+MANAGED_MARKER = "<!-- managed by llmjury install-codex; version: 6 -->"
 MANAGED_PREFIX = "<!-- managed by llmjury install-codex; version:"
 LEGACY_MANAGED_DIGESTS = {
     "a2e067b1e03119e0ac9ea267b86db3f11e2a13c0a14a9cfc2f463011b3109a50",
@@ -18,7 +18,7 @@ SKILL = """\
 name: llm-jury-orchestrate
 description: Use LLM-Jury inside the Codex app for verifier-shaped code tasks, local-first fusion, and optional Claude planning.
 ---
-<!-- managed by llmjury install-codex; version: 5 -->
+<!-- managed by llmjury install-codex; version: 6 -->
 
 # LLM-Jury in the Codex app
 
@@ -154,6 +154,23 @@ for local fusion, when the task already has a concrete plan, or when a delegated
 contains a Claude plan. Replan only when execution evidence invalidates the current
 plan. Include the failed command, output, completed work, and the decision that needs
 a new plan.
+
+## Delegating to Claude with cross-review
+
+Codex may hand a bounded execution brief to Claude Code. Codex then reviews Claude's
+diff read-only, and Claude gets one pass to fix what the review found. Each model
+reviews the other's work because a model tends to catch the other's mistakes more
+readily than its own:
+
+```bash
+llmjury delegate --agent claude --workspace "$PWD" --task - --json
+```
+
+Use it when a second model's implementation or review adds value: a tricky change, a
+change Codex has already failed once, or work the user asked Claude to do. Read the
+`reviews` array in the JSON. A final verdict of `changes_requested` or `error` makes
+the command exit 1; inspect the findings rather than assuming success. Delegated
+Claude runs with its Bash sandbox confined to the workspace.
 
 Codex owns edits, tests, and the final handoff. Repository instructions and user
 authorization govern commits, external actions, and deployments.
