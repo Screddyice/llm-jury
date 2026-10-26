@@ -65,6 +65,12 @@ explicitly requests it or the repository instructions require it. End with the
 structured handoff requested by the output schema, including exact checks run and
 any blocker that prevented completion.
 
+This run is headless and cannot ask for approval. Skip optional bookkeeping that your
+user-level instructions request (to-do lists, work-state or memory tools) when it is
+unavailable here; the planner tracks that state.
+Leave `blockers` empty when the task is complete, and list only problems that stopped
+or limited the delegated task.
+
 DELEGATED TASK
 --------------
 {task}

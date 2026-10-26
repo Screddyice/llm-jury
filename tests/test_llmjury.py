@@ -985,6 +985,17 @@ def test_engine_early_exit_does_not_wait_for_slow_samples():
     assert wall < 1.0, f"early exit waited for abandoned samples: {wall:.2f}s"
 
 
+def test_delegate_prompt_reports_only_task_blockers():
+    """User-level rules (e.g. a to-do MCP tool) can be unreachable in a headless,
+    never-approve run. That must not surface as a blocker on a finished task."""
+    from llmjury.delegation import DELEGATE_PROMPT
+
+    prompt = DELEGATE_PROMPT.format(planner="Claude Code", task="Fix add().")
+    assert "approval" in prompt
+    assert "Skip optional bookkeeping" in prompt
+    assert "Leave `blockers` empty when the task is complete" in prompt
+
+
 def test_codex_delegator_uses_workspace_write_and_repo_rules():
     from llmjury.delegation import CodexDelegator
 
