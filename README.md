@@ -65,11 +65,11 @@ llmjury solve --task examples/add_task.txt --tests examples/add_test.py --entry-
 # or competitive-programming style (stdin/stdout cases as JSON)
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json
 
-# hybrid: local council first, then a verifier-gated OpenRouter ladder
+# hybrid: local council first, then the authenticated Codex and Claude CLIs
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
-    --backend ollama --frontier auto   # needs OPENROUTER_API_KEY
+    --backend ollama --frontier auto
 
-# same, but keep every escalation open-weight (no proprietary top tier)
+# open-weight escalation through OpenRouter instead (needs OPENROUTER_API_KEY)
 llmjury solve --task examples/sum_stdin_task.txt --cases examples/cases.example.json \
     --backend ollama --frontier open
 
@@ -504,7 +504,7 @@ public sample tests," and the escalated ~25% do leave the device. Full caveats �
 intervals, the public-test oracle, the fairness disclosure — are in [BENCHMARKS.md](BENCHMARKS.md).
 
 The table reports the historical benchmark configuration: local council followed by a pinned
-DeepSeek V4 Pro best-of-4 escalation. The newer `--frontier auto` Flash → Pro ladder is designed
+DeepSeek V4 Pro best-of-4 escalation. The `--frontier open` Flash → Pro ladder is designed
 to reduce the cost of the unresolved tail without weakening acceptance, but it should not be
 read as a separately measured benchmark result until that exact policy is reproduced.
 
@@ -556,15 +556,15 @@ read as a separately measured benchmark result until that exact policy is reprod
   against reading unrelated host files.
   Jury calls default to low reasoning effort because the independent verifier supplies
   the acceptance gate; Python callers can override `CodexBackend(reasoning_effort=...)`.
-- **Claude Code CLI (authenticated Anthropic provider)** — used as the last rescue for
-  `--frontier auto` inside Claude Code. It removes the parent-session nesting marker,
+- **Claude Code CLI (authenticated Anthropic provider)** — serves the Claude rungs of
+  `--frontier auto`, `opus` and `fable`. It removes the parent-session nesting marker,
   starts in a temporary directory with safe mode, disables tools and permission prompts,
   and keeps session persistence off. Set `LLMJURY_CLAUDE_MODEL` to change the default
   from `opus`.
   The Claude desktop app sets `CLAUDE_CONFIG_DIR` for its sessions, and that directory
   can hold no login of its own. When the child `claude` answers "Not logged in", the
   backend prints one line naming the directory and retries with the default
-  `~/.claude` login for that call and the rest of the run. A rescue that still fails
+  `~/.claude` login for that call and the rest of the run. A call that still fails
   prints the CLI's own reason, taken from stdout when stderr is empty.
 
 The frontier provider is explicit. `--frontier-backend openrouter` accepts OpenRouter
@@ -572,13 +572,13 @@ slugs and requires `OPENROUTER_API_KEY`; `--frontier-backend codex` accepts a mo
 available to the installed Codex CLI and uses Codex authentication. OpenRouter is not
 coupled to Anthropic: any compatible OpenRouter model slug can be used.
 
-Inside Codex or Claude Code, `--frontier auto` keeps the ordered OpenRouter ladder and
-adds the host's authenticated model as its final rescue. An exhausted OpenRouter balance
-or provider outage can no longer end the run while the host provider remains available.
-Every candidate still has to pass the same verifier. `--frontier open`, `opus`, `fable`,
-and explicit model slugs keep their stated provider boundary; named OpenRouter ladders
-remain invalid with `--frontier-backend codex` because Codex cannot serve OpenRouter
-slugs.
+Foundation models run on their own lab's authenticated CLI, never through OpenRouter.
+`--frontier auto`, `opus` and `fable` resolve to CLI rungs and ignore
+`--frontier-backend`: `auto` tries the calling host's CLI first (Claude inside Claude
+Code, Codex everywhere else), then the other lab's, skipping any CLI that isn't
+installed. Every candidate still has to pass the same verifier. `--frontier open` is
+the one named OpenRouter ladder; it stays invalid with `--frontier-backend codex`
+because Codex cannot serve OpenRouter slugs.
 
 The completion cache stores generated candidates, not transport failures. Empty results
 from timeouts, account errors, and unavailable routes are retried on the next run. This
@@ -769,27 +769,23 @@ after; zero new lines means nothing was generated. To force a cold run, move the
 aside and restore it afterwards.
 
 `--frontier auto` is the recommended local-first policy. It keeps the cross-lineage
-Ollama council first, then tries DeepSeek V4 Flash for a low-cost cloud recovery,
-DeepSeek V4 Pro for the hard remainder, and finally Claude Opus 5 for the tail that
-nothing cheaper could verify. Every later tier runs only when all earlier candidates
-failed the same oracle, so the faster model cannot lower accuracy — and the tail that
-reaches the last tier is small by construction.
-
-Cost note: the top tier is proprietary and roughly 35× the per-token price of the
-open-weight tiers below it ($5/$25 per M vs $0.14/$0.28). It is last precisely so it
-bills only on problems two cheaper tiers already failed. Named ladders:
+Ollama council first, then escalates to the foundation models through their labs'
+authenticated CLIs, which bill against the existing subscriptions and need no API key.
+Each later rung runs only when every earlier candidate failed the same oracle.
 
 | `--frontier` | Escalation order after the local council |
 |---|---|
-| `auto` | DeepSeek V4 Flash → DeepSeek V4 Pro → Claude Opus 5 |
-| `open` | DeepSeek V4 Flash → DeepSeek V4 Pro (open-weight only, no proprietary tier) |
-| `opus` | Claude Opus 5 |
-| `fable` | Claude Fable 5 |
-| any other value | passed to the provider verbatim as a model slug |
+| `auto` in Claude Code | Claude CLI (`opus`) → Codex CLI (`gpt-5.6-sol`) |
+| `auto` elsewhere | Codex CLI (`gpt-5.6-sol`) → Claude CLI (`opus`) |
+| `opus` | Claude CLI, `opus` |
+| `fable` | Claude CLI, `fable` |
+| `open` | OpenRouter DeepSeek V4 Flash → V4 Pro (open-weight, needs `OPENROUTER_API_KEY`) |
+| any other value | passed to `--frontier-backend` verbatim as a model slug |
 
-Use `open` to cap escalation spend, or pin a slug when reproducing a historical
-benchmark or testing a specific model. `LLMJURY_TOP_FRONTIER` overrides which model
-`auto` ends on, so the top tier is configurable rather than baked in.
+`LLMJURY_CODEX_MODEL` and `LLMJURY_CLAUDE_MODEL` choose the `auto` models. Until
+2026-10-26 `auto` was an OpenRouter ladder (Flash → Pro → `anthropic/claude-opus-5`)
+with a host CLI as the last rescue. On this host OpenRouter is reserved for JEV, so
+foundation models moved to their own CLIs and `LLMJURY_TOP_FRONTIER` was removed.
 
 Reasoning models spend part of their token budget on private thinking before emitting
 any code, and providers count those tokens against `max_tokens`. Since the frontier

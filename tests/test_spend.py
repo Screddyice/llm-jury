@@ -196,10 +196,9 @@ def test_record_subscription_never_raises(tmp_path, monkeypatch):
 def test_claude_cli_escalation_is_recorded_as_avoided_spend(tmp_path, monkeypatch):
     """The Claude rescue is the same economics as the Codex one, and was equally silent.
 
-    Inside Claude Code, `_claude_frontier_rescue` diverts the ladder's paid
-    Anthropic rung to the authenticated CLI — the rung that costs roughly 35x the
-    open-weight tiers on OpenRouter. Nothing was metered, so nothing was recorded,
-    so the largest avoided cost in the whole ladder was the least visible.
+    The `auto` ladder runs Anthropic's rung on the authenticated Claude CLI rather
+    than metered OpenRouter. Nothing was metered, so nothing was recorded, so the
+    largest avoided cost in the whole ladder was the least visible.
     """
     import types
     from llmjury import backends

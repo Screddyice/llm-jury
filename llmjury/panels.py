@@ -31,36 +31,30 @@ LOCAL_BEST = "gemma3:12b"
 CODEX_BEST = os.environ.get("LLMJURY_CODEX_MODEL", "gpt-5.6-sol")
 CODEX_PANEL = [CODEX_BEST]
 
-# Claude Code is also a single authenticated frontier provider. It is used as
-# the final rescue for `--frontier auto` when the caller is a Claude Code session.
+# Claude Code is also a single authenticated frontier provider.
 CLAUDE_BEST = os.environ.get("LLMJURY_CLAUDE_MODEL", "opus")
 
-# Verifier-gated OpenRouter escalation. These are deliberately ordered by role,
-# not fanned out on every task: Flash is the low-cost first cloud recovery, then
-# Pro is the benchmark-backed accuracy tier for the genuinely hard remainder.
-# Both are open-weight models; the local council remains the default first line.
+# Foundation models run on their own lab's authenticated CLI (subscription auth),
+# never through OpenRouter, which on this host is reserved for JEV. These named
+# ladders resolve to (model, CLI backend) rungs. `auto` is None because its order
+# depends on the calling host: that host's CLI first, then the other lab's.
+CLI_FRONTIER_ALIASES = {
+    "auto": None,
+    "opus": [("opus", "claude")],
+    "fable": [("fable", "claude")],
+}
+
+# The one OpenRouter ladder left: open-weight models that have no CLI of their
+# own. Explicit opt-in only, and it needs its own OPENROUTER_API_KEY.
 OPEN_SOURCE_FRONTIER = [
     "deepseek/deepseek-v4-flash",
     "deepseek/deepseek-v4-pro",
 ]
 
-# The last-resort tier for the hard tail nothing cheaper could verify. This is a
-# proprietary model and ~35x the per-token cost of the open-weight ladder above,
-# which is why it is last: every earlier tier must have failed the same oracle
-# before a single token is spent here.
-TOP_FRONTIER = os.environ.get("LLMJURY_TOP_FRONTIER", "anthropic/claude-opus-5")
-
-# What `--frontier auto` resolves to: cheap open-weight recovery first, then one
-# proprietary top tier. Use `--frontier open` to keep escalation open-weight only.
-AUTO_FRONTIER = OPEN_SOURCE_FRONTIER + [TOP_FRONTIER]
-
-# Shorthands accepted by `--frontier`, so callers don't have to memorise slugs.
-# Anything not listed here is passed through to the provider verbatim.
+# Shorthands accepted by `--frontier` with `--frontier-backend openrouter`.
+# Anything not listed here or in CLI_FRONTIER_ALIASES goes to the provider verbatim.
 FRONTIER_ALIASES = {
-    "auto": AUTO_FRONTIER,
     "open": OPEN_SOURCE_FRONTIER,
-    "opus": ["anthropic/claude-opus-5"],
-    "fable": ["anthropic/claude-fable-5"],
 }
 
 
