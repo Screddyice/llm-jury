@@ -29,14 +29,18 @@ class CliRunOutcome:
 def run_cli(runner, cmd, timeout, cwd=None):
     """Invoke ``runner`` (``subprocess.run``-shaped) and classify the outcome.
 
-    Always passes ``stdout=PIPE, stderr=PIPE, text=True, check=False`` plus the
-    given ``timeout``; ``cwd`` is forwarded only when set, so call sites that
+    Always passes ``stdin=DEVNULL, stdout=PIPE, stderr=PIPE, text=True,
+    check=False`` plus the given ``timeout``; ``cwd`` is forwarded only when set, so
+    call sites that
     never passed one keep an identical runner invocation (injected test runners
     see the same kwargs as before).
     """
+    # stdin is always empty. `codex exec` reads a non-TTY stdin to EOF before it
+    # starts, so inheriting llmjury's own stdin (an open pipe under an agent, a
+    # hook, or cron) hung every Codex call until its timeout.
     kwargs = dict(
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        timeout=timeout, check=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, timeout=timeout, check=False,
     )
     if cwd is not None:
         kwargs["cwd"] = cwd

@@ -2065,3 +2065,31 @@ def test_snapshot_failure_reports_error_without_launching_reviewer(tmp_path, hoo
 
     assert reviewer.calls == []
     assert "git add" in capsys.readouterr().err
+
+
+def test_run_cli_children_never_wait_on_the_parents_stdin():
+    """An agent CLI that reads stdin (codex exec does) must not hang when llmjury's
+    own stdin is an open pipe, as it is under an agent, a hook, or cron."""
+    from llmjury.cliproc import run_cli
+
+    seen = {}
+
+    def runner(cmd, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    run_cli(runner, ["x"], 5)
+    assert seen["stdin"] is subprocess.DEVNULL
+
+    read_end, write_end = os.pipe()  # write_end stays open: stdin never reaches EOF
+    saved = os.dup(0)
+    os.dup2(read_end, 0)
+    try:
+        outcome = run_cli(subprocess.run,
+                          [sys.executable, "-c", "import sys; print(len(sys.stdin.read()))"], 5)
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, read_end, write_end):
+            os.close(fd)
+    assert not outcome.timed_out
+    assert outcome.completed.stdout.strip() == "0"
