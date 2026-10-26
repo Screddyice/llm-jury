@@ -2018,3 +2018,50 @@ def test_review_hook_approval_lets_agent_stop(tmp_path, hook_env):
     reviewer = _Reviewer(verdict="approve", findings=())
     assert hook_env.decide({"session_id": "s4", "cwd": str(repo)}, "Codex", reviewer) is None
     assert len(reviewer.calls) == 1
+
+
+def test_review_hook_scopes_nested_workspace_and_preserves_the_real_index(tmp_path, hook_env):
+    repo = _hook_repo(tmp_path)
+    workspace = repo / "active-chat"
+    workspace.mkdir()
+    (workspace / "change.py").write_text("value = 1\n")
+    subprocess.run(["git", "-C", str(repo), "add", "active-chat"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t",
+                    "-c", "commit.gpgsign=false", "commit", "-qm", "add workspace"], check=True)
+    # This sibling is the real desktop failure: it has no commit to index.
+    neighbor = repo / "another-chat"
+    subprocess.run(["git", "init", "-q", str(neighbor)], check=True)
+    (repo / "a.py").write_text("outside = 'staged user work'\n")
+    subprocess.run(["git", "-C", str(repo), "add", "a.py"], check=True)
+    index_before = (repo / ".git" / "index").read_bytes()
+    (workspace / "change.py").write_text("value = 2\n")
+    (workspace / "new.py").write_text("new_value = 3\n")
+    reviewer = _Reviewer()
+
+    payload = hook_env.decide({"session_id": "nested", "cwd": str(workspace)},
+                              "Claude", reviewer)
+
+    assert payload["decision"] == "block"
+    change = reviewer.calls[0][1]
+    assert "diff --git a/change.py b/change.py" in change
+    assert "+value = 2" in change and "+new_value = 3" in change
+    assert "outside" not in change and "another-chat" not in change
+    assert "active-chat/" not in change  # paths are relative to the reviewer's cwd
+    assert (repo / ".git" / "index").read_bytes() == index_before
+    hook_env.os.environ.pop(hook_env.NESTED_ENV, None)
+    (repo / "a.py").write_text("outside = 'changed after the review'\n")
+    assert hook_env.decide({"session_id": "nested", "cwd": str(workspace)},
+                           "Claude", reviewer) is None
+    assert len(reviewer.calls) == 1
+
+
+def test_snapshot_failure_reports_error_without_launching_reviewer(tmp_path, hook_env, capsys):
+    repo = _hook_repo(tmp_path)
+    subprocess.run(["git", "init", "-q", str(repo / "unfinished")], check=True)
+    reviewer = _Reviewer()
+
+    assert hook_env.decide({"session_id": "failed", "cwd": str(repo)},
+                           "Claude", reviewer) is None
+
+    assert reviewer.calls == []
+    assert "git add" in capsys.readouterr().err
