@@ -69,8 +69,9 @@ def _refuse_root():
 def _frontier_models(value, backend_name):
     """Resolve CLI shorthand without making a provider call.
 
-    Named ladders (auto/open/opus/fable) expand to OpenRouter slugs; anything
-    else is passed through to the chosen provider verbatim.
+    The OpenRouter ladder (`open`) expands to its slugs; anything else is passed
+    through to the chosen provider verbatim. CLI ladders resolve separately, in
+    `_cli_frontier_ladder`.
     """
     from .panels import FRONTIER_ALIASES
     if value not in FRONTIER_ALIASES:
@@ -105,33 +106,21 @@ def _safe_local_panel(models, best, memory_check, host, num_ctx):
     return None, None
 
 
-def _codex_frontier_rescue(value, backend_name):
-    """Return the authenticated Codex rescue model for `auto` inside Codex.
+def _cli_frontier_ladder(value):
+    """Resolve a named CLI ladder to ``[(model, backend)]`` for installed CLIs.
 
-    OpenRouter remains the ordered first choice. A Codex-hosted run already has a
-    separate authenticated provider available, so it can recover after account,
-    route, or provider failures without weakening the verifier gate.
+    Returns None when ``value`` is not a CLI ladder. `auto` puts the calling host's
+    own CLI first (Claude inside Claude Code, otherwise Codex), then the other lab's.
     """
-    if value != "auto" or backend_name != "openrouter":
+    from .panels import CLAUDE_BEST, CLI_FRONTIER_ALIASES, CODEX_BEST
+    if value not in CLI_FRONTIER_ALIASES:
         return None
-    if not (os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")):
-        return None
-    if not shutil.which("codex"):
-        return None
-    from .panels import CODEX_BEST
-    return CODEX_BEST
-
-
-def _claude_frontier_rescue(value, backend_name):
-    """Return the authenticated Claude rescue model inside Claude Code."""
-    if value != "auto" or backend_name != "openrouter":
-        return None
-    if os.environ.get("CLAUDECODE", "").strip() in ("", "0"):
-        return None
-    if not shutil.which("claude"):
-        return None
-    from .panels import CLAUDE_BEST
-    return CLAUDE_BEST
+    rungs = CLI_FRONTIER_ALIASES[value]
+    if rungs is None:
+        codex, claude = (CODEX_BEST, "codex"), (CLAUDE_BEST, "claude")
+        in_claude = os.environ.get("CLAUDECODE", "").strip() not in ("", "0")
+        rungs = [claude, codex] if in_claude else [codex, claude]
+    return [(model, cli) for model, cli in rungs if shutil.which(cli)]
 
 
 def _func_cases(raw):
@@ -281,32 +270,34 @@ def _cmd_solve(a):
         "ranking_basis": ranking_basis,
         "headroom_policy": "admit highest-ranked model; council and analyst only when capacity remains",
     }
-    try:
-        frontier = _frontier_models(a.frontier, a.frontier_backend)
-    except ValueError as e:
-        sys.exit(f"error: {e}")
-    claude_rescue = _claude_frontier_rescue(a.frontier, a.frontier_backend)
-    codex_rescue = _codex_frontier_rescue(a.frontier, a.frontier_backend)
-    rescue_model = claude_rescue or codex_rescue
-    rescue_backend = "claude" if claude_rescue else "codex" if codex_rescue else None
-    frontier_route = {}
-    if rescue_model:
-        frontier.append(rescue_model)
-        frontier_route[rescue_model] = _backend(rescue_backend)
     from .panels import FRONTIER_ALIASES
-    if a.frontier in FRONTIER_ALIASES:
+    ladder = _cli_frontier_ladder(a.frontier)
+    frontier_route = {}
+    fb = None
+    if ladder is not None:
+        if not ladder:
+            sys.exit(f"error: --frontier {a.frontier} needs an installed, authenticated "
+                     "codex or claude CLI")
+        frontier = [model for model, _ in ladder]
+        frontier_route = {model: _backend(cli) for model, cli in ladder}
+        fb = frontier_route[frontier[0]]
+        frontier_providers = ", then ".join(dict.fromkeys(f"{cli} CLI" for _, cli in ladder))
         sys.stderr.write(
             f"[llmjury] {a.frontier} route: local council -> "
-            + _frontier_label(frontier) + " (verifier-gated)\n")
-    if rescue_model:
-        host = "Claude Code" if rescue_backend == "claude" else "Codex"
-        provider = "Claude" if rescue_backend == "claude" else "Codex"
-        sys.stderr.write(
-            f"[llmjury] {host} session detected; authenticated {provider} is the final "
-            "rescue if OpenRouter produces no verified candidate\n")
-    fb = None
-    if frontier:
-        fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
+            + " -> ".join(f"{model} ({cli} CLI)" for model, cli in ladder)
+            + " (verifier-gated)\n")
+    else:
+        try:
+            frontier = _frontier_models(a.frontier, a.frontier_backend)
+        except ValueError as e:
+            sys.exit(f"error: {e}")
+        frontier_providers = a.frontier_backend
+        if a.frontier in FRONTIER_ALIASES:
+            sys.stderr.write(
+                f"[llmjury] {a.frontier} route: local council -> "
+                + _frontier_label(frontier) + " (verifier-gated)\n")
+        if frontier:
+            fb = _backend(a.frontier_backend, num_ctx=a.num_ctx)
     use_panel = True
     if backend.name == "ollama":
         # Preflight: flag panel tags with a baked SYSTEM prompt before spending
@@ -356,10 +347,6 @@ def _cmd_solve(a):
                             "council members: " + ", ".join(routed) + "\n")
                     elif frontier and not report.terminal and a.frontier_backend != "ollama":
                         use_panel = False
-                        frontier_providers = (
-                            f"{a.frontier_backend}, then {rescue_backend}"
-                            if rescue_model else a.frontier_backend
-                        )
                         sys.stderr.write(
                             "[llmjury] skipping the local council; escalating straight to "
                             + _frontier_label(frontier) + f" on {frontier_providers} "
@@ -370,8 +357,8 @@ def _cmd_solve(a):
                         sys.exit(
                             "error: this panel would over-commit the host, which can hang or "
                             f"panic it.\nhint: {report.hint()}\n"
-                            "or: add --frontier auto to escalate to the cloud ladder, which "
-                            "needs no local memory\n"
+                            "or: add --frontier auto to escalate to the frontier CLIs, which "
+                            "need no local memory\n"
                             "The scheduler also enforces memory admission for every local stage.")
                 elif not selected:
                     sys.stderr.write(
@@ -388,7 +375,7 @@ def _cmd_solve(a):
                frontier=frontier, frontier_backend=fb, route=route,
                frontier_route=frontier_route,
                use_panel=use_panel, frontier_k=getattr(a, "frontier_k", None),
-               frontier_defaults={"codex": 1},
+               frontier_defaults={"codex": 1, "claude": 1},
                local_scheduler=_local_scheduler(backend, a.num_ctx),
                rebalance=not bool(a.best),
                analyst_model=analyst_model,
@@ -609,8 +596,9 @@ def main():
     s.add_argument("--best", help="model to try first (default: first of --models, or the panel best)")
     s.add_argument("--json", action="store_true", help="emit a JSON result instead of the human banner")
     s.add_argument("--frontier", help="opt-in: a cloud model to try when the council can't verify. "
-                   "Named ladders: 'auto' (open-weight, then a proprietary top tier), "
-                   "'open' (open-weight only), 'opus', 'fable'. Any other value is a provider slug")
+                   "Named ladders on the authenticated lab CLIs: 'auto' (this host's CLI, "
+                   "then the other lab's), 'opus', 'fable' (Claude CLI). 'open' is the "
+                   "OpenRouter open-weight ladder. Any other value is a provider slug")
     s.add_argument("--frontier-backend", default="openrouter",
                    choices=["openrouter", "codex"],
                    help="provider for --frontier (default: openrouter; codex reuses "

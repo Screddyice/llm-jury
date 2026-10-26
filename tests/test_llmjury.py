@@ -307,16 +307,18 @@ def test_cli_codex_frontier_and_mixed_ladder_rescue_use_one_candidate():
     for provider, mixed, explicit, expected in (
         ("codex", False, [], [1]),
         ("openrouter", False, [], [4]),
-        ("openrouter", True, [], [4, 1]),
+        ("openrouter", True, [], [1, 1]),
         ("openrouter", True, ["--frontier-k", "3"], [3, 3]),
     ):
         local = _FakeBackend({"local": [_BAD]})
         local.name = "openrouter"
-        remote = _FakeBackend({"flash": [_BAD if mixed else _GOOD]})
+        remote = _FakeBackend({"flash": [_GOOD]})
         remote.name = "openrouter"
-        codex = _FakeBackend({"gpt": [_GOOD]})
+        codex = _FakeBackend({"gpt": [_BAD if mixed else _GOOD]})
         codex.name = "codex"
-        backends = {"openrouter": remote, "codex": codex}
+        claude = _FakeBackend({"op": [_GOOD]})
+        claude.name = "claude"
+        backends = {"openrouter": remote, "codex": codex, "claude": claude}
         calls = []
 
         def backend(name, **kwargs):
@@ -324,6 +326,7 @@ def test_cli_codex_frontier_and_mixed_ladder_rescue_use_one_candidate():
             return local if len(calls) == 1 else backends[name]
 
         frontier = "auto" if mixed else "gpt" if provider == "codex" else "flash"
+        ladder = [("gpt", "codex"), ("op", "claude")] if mixed else None
         argv = ["llmjury", "solve", "--task", "task", "--cases", "cases",
                 "--entry-point", "add", "--backend", "openrouter", "--models", "local",
                 "--frontier", frontier, "--frontier-backend", provider, "--json"] + explicit
@@ -332,17 +335,17 @@ def test_cli_codex_frontier_and_mixed_ladder_rescue_use_one_candidate():
         ), patch.object(cli, "_backend", side_effect=backend), patch.object(
             cli, "_read", side_effect=lambda path: '[{"args": [2, 3], "expected": 5}]'
             if path == "cases" else "implement add",
-        ), patch.object(cli, "_frontier_models", return_value=["flash"] if mixed else frontier), patch.object(
-            cli, "_claude_frontier_rescue", return_value=None,
-        ), patch.object(cli, "_codex_frontier_rescue", return_value="gpt" if mixed else None), patch.object(
+        ), patch.object(cli, "_cli_frontier_ladder", return_value=ladder), patch.object(
             cli.os, "_exit",
         ) as exit_process:
             cli.main()
             exit_process.assert_called_once_with(0)
-        observed = ([remote.calls[0][2]] if remote.calls else []) + (
-            [codex.calls[0][2]] if codex.calls else [])
+        observed = [b.calls[0][2] for b in (remote, codex, claude) if b.calls]
         assert observed == expected
         assert local.calls[0][2] == 4
+        if mixed:
+            assert "openrouter" not in calls[1:], "a named ladder must not use OpenRouter"
+            assert not remote.calls
 
 
 def test_engine_single_when_best_solves():
@@ -677,81 +680,53 @@ def test_frontier_label_keeps_explicit_codex_model_intact():
     assert _frontier_label(["model-a", "model-b"]) == "model-a -> model-b"
 
 
-def test_cli_auto_frontier_resolves_open_source_ladder():
+def test_cli_open_frontier_stays_an_explicit_openrouter_ladder():
     from llmjury.cli import _frontier_models
-    from llmjury.panels import AUTO_FRONTIER, OPEN_SOURCE_FRONTIER
-    assert _frontier_models("auto", "openrouter") == AUTO_FRONTIER
+    from llmjury.panels import OPEN_SOURCE_FRONTIER
     assert _frontier_models("open", "openrouter") == OPEN_SOURCE_FRONTIER
     assert _frontier_models("custom/model", "openrouter") == "custom/model"
     try:
-        _frontier_models("auto", "codex")
-        assert False, "auto must reject non-OpenRouter frontier backends"
+        _frontier_models("open", "codex")
+        assert False, "open must reject non-OpenRouter frontier backends"
     except ValueError:
         pass
 
 
-def test_cli_auto_frontier_uses_authenticated_codex_as_last_resort_in_codex():
+def test_cli_auto_frontier_runs_on_the_lab_clis_host_first():
+    """Foundation models go through their own lab's CLI, never OpenRouter."""
     from unittest.mock import patch
-    from llmjury.cli import _codex_frontier_rescue
-    from llmjury.panels import CODEX_BEST
+    from llmjury.cli import _cli_frontier_ladder
+    from llmjury.panels import CLAUDE_BEST, CODEX_BEST
 
-    with patch.dict(os.environ, {"CODEX_THREAD_ID": "thread"}, clear=False), \
-            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/codex"):
-        assert _codex_frontier_rescue("auto", "openrouter") == CODEX_BEST
-        assert _codex_frontier_rescue("open", "openrouter") is None
-        assert _codex_frontier_rescue("auto", "codex") is None
-
-
-def test_cli_auto_frontier_does_not_invent_codex_outside_a_codex_session():
-    from unittest.mock import patch
-    from llmjury.cli import _codex_frontier_rescue
-
-    clean_env = {k: v for k, v in os.environ.items()
-                 if k not in ("CODEX_THREAD_ID", "CODEX_SESSION_ID")}
-    with patch.dict(os.environ, clean_env, clear=True), \
-            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/codex"):
-        assert _codex_frontier_rescue("auto", "openrouter") is None
-
-
-def test_cli_auto_frontier_uses_authenticated_claude_as_last_resort_in_claude_code():
-    from unittest.mock import patch
-    from llmjury.cli import _claude_frontier_rescue
-    from llmjury.panels import CLAUDE_BEST
-
+    both = lambda name: f"/usr/local/bin/{name}"
+    clean = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    with patch.dict(os.environ, clean, clear=True), \
+            patch("llmjury.cli.shutil.which", side_effect=both):
+        assert _cli_frontier_ladder("auto") == [(CODEX_BEST, "codex"), (CLAUDE_BEST, "claude")]
     with patch.dict(os.environ, {"CLAUDECODE": "1"}, clear=False), \
-            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/claude"):
-        assert _claude_frontier_rescue("auto", "openrouter") == CLAUDE_BEST
-        assert _claude_frontier_rescue("open", "openrouter") is None
-        assert _claude_frontier_rescue("auto", "claude") is None
+            patch("llmjury.cli.shutil.which", side_effect=both):
+        assert _cli_frontier_ladder("auto") == [(CLAUDE_BEST, "claude"), (CODEX_BEST, "codex")]
+    with patch.dict(os.environ, clean, clear=True), patch(
+            "llmjury.cli.shutil.which",
+            side_effect=lambda name: both(name) if name == "claude" else None):
+        assert _cli_frontier_ladder("auto") == [(CLAUDE_BEST, "claude")]
+    with patch("llmjury.cli.shutil.which", return_value=None):
+        assert _cli_frontier_ladder("auto") == []
+    assert _cli_frontier_ladder("open") is None
+    assert _cli_frontier_ladder("gpt-5.6-sol") is None
+    assert _cli_frontier_ladder(None) is None
 
 
-def test_cli_auto_frontier_does_not_invent_claude_outside_claude_code():
+def test_cli_named_frontier_aliases_resolve_to_the_claude_cli():
     from unittest.mock import patch
-    from llmjury.cli import _claude_frontier_rescue
+    from llmjury.cli import _cli_frontier_ladder
+    from llmjury.panels import FRONTIER_ALIASES
 
-    clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-    with patch.dict(os.environ, clean_env, clear=True), \
-            patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/claude"):
-        assert _claude_frontier_rescue("auto", "openrouter") is None
-
-
-def test_auto_frontier_tries_open_weight_before_the_paid_top_tier():
-    """Cost ordering is the whole point: the proprietary tier must be last."""
-    from llmjury.panels import AUTO_FRONTIER, OPEN_SOURCE_FRONTIER, TOP_FRONTIER
-    assert AUTO_FRONTIER[:len(OPEN_SOURCE_FRONTIER)] == OPEN_SOURCE_FRONTIER
-    assert AUTO_FRONTIER[-1] == TOP_FRONTIER
-    assert TOP_FRONTIER not in OPEN_SOURCE_FRONTIER
-
-
-def test_cli_named_frontier_aliases_resolve_to_slugs():
-    from llmjury.cli import _frontier_models
-    assert _frontier_models("opus", "openrouter") == ["anthropic/claude-opus-5"]
-    assert _frontier_models("fable", "openrouter") == ["anthropic/claude-fable-5"]
-    try:
-        _frontier_models("opus", "codex")
-        assert False, "named ladders must reject non-OpenRouter frontier backends"
-    except ValueError:
-        pass
+    with patch("llmjury.cli.shutil.which", return_value="/usr/local/bin/claude"):
+        assert _cli_frontier_ladder("opus") == [("opus", "claude")]
+        assert _cli_frontier_ladder("fable") == [("fable", "claude")]
+    for slugs in FRONTIER_ALIASES.values():
+        assert not any(s.startswith(("anthropic/", "openai/")) for s in slugs)
 
 
 def test_openrouter_never_returns_thinking_as_an_answer():

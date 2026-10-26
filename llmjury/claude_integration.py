@@ -87,11 +87,9 @@ not a vote — decides what survives. "Don't vote, verify."
            [--entry-point NAME] --backend ollama --frontier auto
 
    Omit `--frontier auto` when the user asked to stay local/offline.
-   In Claude Code, `auto` tries the OpenRouter ladder first and then launches an
-   authenticated, tool-free Claude CLI call as the final rescue. The rescue runs in
-   safe mode outside the repository and still must pass the same oracle.
-   `insufficient credits` means the OpenRouter account is empty and every
-   OpenRouter tier was skipped; say so in the report.
+   In Claude Code, `auto` escalates to an authenticated, tool-free Claude CLI call
+   first and the Codex CLI second. Each runs outside the repository and still must
+   pass the same oracle. No OpenRouter key is involved.
 4. **Report honestly.** On success, return the verified code verbatim plus the
    `stage / model / attempts` line. On failure, report the verifier output as a
    failure — never hand-write a "fixed" answer and present it as verified.

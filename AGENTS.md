@@ -58,9 +58,8 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
 - Codex CLI is an authenticated OpenAI provider and may be used directly or as the
   frontier tier. It must run ephemeral and read-only for candidate generation: no tools,
   no subagents, no memory, one turn, empty temp cwd. It authenticates from its own
-  session, so escalating to it spends no metered credit — inside Codex, prefer it over an
-  OpenRouter ladder. Named ladders resolve to OpenRouter slugs and must keep rejecting
-  `--frontier-backend codex`.
+  session, so escalating to it spends no metered credit. The `open` ladder resolves to
+  OpenRouter slugs and must keep rejecting `--frontier-backend codex`.
 - Agent frontmatter must keep `description:` a quoted YAML scalar. Claude Code parses it
   leniently, but under a strict YAML parser an unquoted description containing a
   colon-space reads as a mapping and the agent is silently dropped, with no error
@@ -76,13 +75,12 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
 - OpenRouter is a model-agnostic cloud provider. The backend must stay model-agnostic:
   no Anthropic-specific request shapes, response parsing, or auth paths. Model choice
   is policy, expressed as data in `llmjury.panels`, never wired into transport code.
-- `--frontier auto` ends on a proprietary top tier (`TOP_FRONTIER`, Claude Opus 5) after
-  the open-weight ladder. That is a deliberate default-policy choice, not a coupling:
-  it is one env-overridable constant (`LLMJURY_TOP_FRONTIER`), and `--frontier open`
-  keeps escalation open-weight only. Keep both paths working.
-- Cost ordering is a correctness property of the ladder, not a preference. The
-  proprietary tier costs ~35× the open-weight tiers, so it must stay last and stay
-  verifier-gated; a test asserts that ordering. Never fan out across tiers.
+- Foundation models run on their own lab's authenticated CLI, never through
+  OpenRouter, which this host reserves for JEV. `--frontier auto`, `opus` and `fable`
+  are CLI ladders (`CLI_FRONTIER_ALIASES`); `--frontier open` is the only named
+  OpenRouter ladder, for open-weight models with no CLI. Keep both paths working.
+- Escalation is sequential and verifier-gated: a rung runs only after every earlier
+  candidate failed the same oracle. Never fan out across rungs.
 - The ordering earns its keep, measured rather than assumed. Well-known algorithmic
   problems are solved by the local council alone, even under an oracle that enforces an
   O(n log n) bound — their solutions are memorised. What escalates is a task whose shape
@@ -91,7 +89,8 @@ is available. It reports that the sandbox was disabled, not that Docker is down 
 - The Codex workflow uses `--backend ollama --frontier gpt-5.6-sol
   --frontier-backend codex`: local council first, then authenticated Codex when
   local verification fails or ordinary memory admission refuses the panel.
-  Use the OpenRouter ladder only when the user requests it.
+  `--frontier auto` reaches the same CLIs. Use `--frontier open` (OpenRouter) only when
+  the user requests it.
 - Exclusive Qwen 27B ownership stops every jury provider, including remote
   frontiers. Do not turn this terminal refusal into a cloud fallback.
 - The verifier, not the provider, decides which candidate is accepted.
