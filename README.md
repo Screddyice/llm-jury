@@ -410,6 +410,12 @@ llmjury solve --task task.txt --tests tests.py --entry-point solve \
     --frontier-backend codex --frontier-k 1 --jobs 2 --num-ctx 8192 --json
 ```
 
+Every agent CLI llmjury starts (Codex, Claude, the delegators and the planner) gets an
+empty stdin. `codex exec` reads a piped stdin to EOF before it starts, so a Codex call
+used to hang until its 600 s timeout whenever llmjury itself ran with an open pipe on
+stdin, which is the normal case under an agent, a hook, or cron. That made the Codex
+rescue at the end of the `auto` ladder time out instead of rescuing.
+
 The council runs through local Ollama. The fallback reuses `codex login` and the Codex
 subscription, so this workflow does not call OpenRouter. The CLI reports the accepted
 stage and model. The fallback launches an ephemeral read-only generation session, ignores
