@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -389,20 +390,28 @@ def _git(workspace, *args, index=None):
 def snapshot_tree(workspace):
     """Return a git tree id for the workspace's current files, or None outside git.
 
-    Uses a throwaway index, so the user's staging area and working tree are untouched.
+    Uses a throwaway index scoped to workspace, so sibling directories and the
+    user's staging area are untouched even when workspace is below the Git root.
     """
     if _git(workspace, "rev-parse", "--is-inside-work-tree").returncode != 0:
         return None
     with tempfile.TemporaryDirectory(prefix="llmjury-index-") as tmp:
         index = str(Path(tmp) / "index")
-        if _git(workspace, "add", "-A", index=index).returncode != 0:
+        staged = _git(workspace, "add", "-A", "--", ".", index=index)
+        if staged.returncode != 0:
+            sys.stderr.write("[llmjury] workspace snapshot failed: git add\n"
+                             + staged.stderr[-2000:])
             return None
         tree = _git(workspace, "write-tree", index=index)
+        if tree.returncode != 0:
+            sys.stderr.write("[llmjury] workspace snapshot failed: git write-tree\n"
+                             + tree.stderr[-2000:])
     return tree.stdout.strip() if tree.returncode == 0 else None
 
 
 def tree_diff(workspace, before, after):
-    return _git(workspace, "diff", "--no-ext-diff", before, after).stdout
+    return _git(workspace, "diff", "--no-ext-diff", "--relative",
+                before, after, "--", ".").stdout
 
 
 MAX_REVIEW_DIFF = 60_000

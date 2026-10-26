@@ -294,6 +294,10 @@ become the agent's next prompt:
 - The first review in a session covers everything since `HEAD`. Each later one covers
   only what changed since the previous review, tracked per session in
   `~/.llmjury/review-hook/`.
+- Snapshots and diffs cover only the active workspace directory, including its
+  untracked files. A chat below a larger Git root does not index or review sibling
+  task folders. Diff paths are relative to the workspace, and the real Git index
+  stays untouched. Snapshot failures are reported on stderr; they are not approval.
 - There is one review per turn. The fix pass that follows a review (`stop_hook_active`)
   is not reviewed again until the next turn.
 - The hook stays silent outside git, when nothing changed, in RS21 repositories (any
