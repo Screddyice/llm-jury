@@ -15,7 +15,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .cliproc import run_cli
@@ -30,8 +30,9 @@ HANDOFF_SCHEMA = {
         "changed_files": {"type": "array", "items": {"type": "string"}},
         "tests": {"type": "array", "items": {"type": "string"}},
         "blockers": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["status", "summary", "changed_files", "tests", "blockers"],
+    "required": ["status", "summary", "changed_files", "tests", "blockers", "notes"],
 }
 
 
@@ -69,7 +70,8 @@ This run is headless and cannot ask for approval. Skip optional bookkeeping that
 user-level instructions request (to-do lists, work-state or memory tools) when it is
 unavailable here; the planner tracks that state.
 Leave `blockers` empty when the task is complete, and list only problems that stopped
-or limited the delegated task.
+or limited the delegated task. Put side remarks, including skipped bookkeeping, in
+`notes`.
 
 DELEGATED TASK
 --------------
@@ -117,6 +119,7 @@ class DelegationResult:
     tests: list[str]
     blockers: list[str]
     returncode: int = 0
+    notes: list[str] = field(default_factory=list)
 
     def to_dict(self):
         return asdict(self)
@@ -165,7 +168,8 @@ def _handoff_result(agent, payload, completed):
         if not blockers:
             blockers.append(f"{agent} exited with status {completed.returncode}.")
     return DelegationResult(status, payload["summary"], list(payload["changed_files"]),
-                            list(payload["tests"]), blockers, completed.returncode)
+                            list(payload["tests"]), blockers, completed.returncode,
+                            list(payload.get("notes", [])))
 
 
 def _review_result(agent, payload, completed):
@@ -185,7 +189,7 @@ def validate_handoff(payload):
     malformed status or non-string list members into the orchestrator.
     """
     required = {"status", "summary", "changed_files", "tests", "blockers"}
-    if not isinstance(payload, dict) or set(payload) != required:
+    if not isinstance(payload, dict) or set(payload) not in (required, required | {"notes"}):
         return False
     if payload["status"] not in ("completed", "blocked"):
         return False
@@ -194,7 +198,7 @@ def validate_handoff(payload):
     return all(
         isinstance(payload[name], list)
         and all(isinstance(item, str) for item in payload[name])
-        for name in ("changed_files", "tests", "blockers")
+        for name in ("changed_files", "tests", "blockers", "notes") if name in payload
     )
 
 
