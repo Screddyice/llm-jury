@@ -994,6 +994,31 @@ def test_delegate_prompt_reports_only_task_blockers():
     assert "approval" in prompt
     assert "Skip optional bookkeeping" in prompt
     assert "Leave `blockers` empty when the task is complete" in prompt
+    assert "`notes`" in prompt
+
+
+def test_handoff_notes_keep_side_remarks_out_of_blockers():
+    """A finished run with a side remark reports it as a note, not a blocker."""
+    from llmjury.delegation import HANDOFF_SCHEMA, CodexDelegator, validate_handoff
+
+    assert "notes" in HANDOFF_SCHEMA["required"]
+    base = {"status": "completed", "summary": "Done.", "changed_files": ["calc.py"],
+            "tests": ["pytest (pass)"], "blockers": []}
+    assert validate_handoff({**base, "notes": ["work-state tool unavailable"]})
+    assert validate_handoff(base)  # older runners without notes stay valid
+    assert not validate_handoff({**base, "notes": [1]})
+
+    def runner(cmd, **kw):
+        output = Path(cmd[cmd.index("--output-last-message") + 1])
+        output.write_text(json.dumps(
+            {**base, "notes": ["work-state tool unavailable"]}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    with tempfile.TemporaryDirectory() as workspace:
+        result = CodexDelegator(runner=runner).delegate("Fix add().", workspace)
+    assert result.status == "completed" and result.blockers == []
+    assert result.notes == ["work-state tool unavailable"]
+    assert result.to_dict()["notes"] == ["work-state tool unavailable"]
 
 
 def test_codex_delegator_uses_workspace_write_and_repo_rules():

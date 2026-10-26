@@ -500,6 +500,8 @@ def cmd_delegate(a):
             print("check: " + check)
         for blocker in result.blockers:
             print("blocker: " + blocker, file=sys.stderr)
+        for note in result.notes:
+            print("note: " + note)
         for review in reviews:
             print(f"review ({review.reviewer}): {review.verdict}: {review.summary}")
             for finding in review.findings:

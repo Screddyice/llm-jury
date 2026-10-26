@@ -224,10 +224,16 @@ current one.
   inheriting the caller's credential-rich environment.
 - Codex returns a schema-validated handoff: status, summary, changed files, checks,
   and blockers. Claude remains responsible for inspecting the diff and final result.
-- `blockers` lists only problems that stopped or limited the task. The delegated run
-  is headless and never asks for approval, so a user-level instruction it cannot follow
-  there (for example a to-do or memory MCP tool in `~/.codex/AGENTS.md`) is skipped
-  instead of being reported as a blocker on a finished task.
+- `blockers` lists only problems that stopped or limited the task. Side remarks go in
+  `notes`. The delegated run is headless and never asks for approval, so a user-level
+  instruction it cannot follow there (for example a to-do or memory MCP tool in
+  `~/.codex/AGENTS.md`) lands in `notes`, not as a blocker on a finished task. A prompt
+  instruction alone did not hold: with no other field, the agent kept filing these
+  remarks under `blockers`. Handoffs without `notes` from older runners still validate.
+- A pipx install is a copy, not a link to your checkout. After pulling a change, refresh
+  it with `pipx runpip llm-jury-verify install --no-deps --force-reinstall <checkout>`.
+  That leaves the `llmjury` launcher symlink alone, which `pipx install --force` would
+  replace.
 - Destructive operations and permission bypasses are not exposed. Extra writable
   directories require an explicit repeatable `--add-dir` argument.
 
