@@ -397,6 +397,10 @@ def snapshot_tree(workspace):
         return None
     with tempfile.TemporaryDirectory(prefix="llmjury-index-") as tmp:
         index = str(Path(tmp) / "index")
+        # Start from HEAD so tracked files under a .gitignore'd path stay in the snapshot;
+        # `add -A` into an empty index skips them and every review saw them as deleted.
+        # A repository with no commits yet has no HEAD and starts empty.
+        _git(workspace, "read-tree", "HEAD", index=index)
         staged = _git(workspace, "add", "-A", "--", ".", index=index)
         if staged.returncode != 0:
             sys.stderr.write("[llmjury] workspace snapshot failed: git add\n"

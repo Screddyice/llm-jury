@@ -1191,6 +1191,29 @@ def test_snapshot_tree_diffs_untracked_files_without_touching_the_index():
         assert snapshot_tree(plain) is None
 
 
+def test_snapshot_tree_keeps_tracked_files_that_gitignore_matches():
+    """A tracked file under an ignored path is not a deletion (hyperscale's .claude/git-hooks)."""
+    from llmjury.delegation import snapshot_tree, tree_diff
+
+    with tempfile.TemporaryDirectory() as workspace:
+        git = ["git", "-C", workspace, "-c", "user.email=t@t", "-c", "user.name=t",
+               "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", "init", "-q", workspace], check=True)
+        Path(workspace, "hooks").mkdir()
+        Path(workspace, "hooks", "pre-push").write_text("exit 1\n")
+        Path(workspace, "a.py").write_text("x = 1\n")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+        Path(workspace, ".gitignore").write_text("hooks/\n")
+        head = subprocess.run([*git, "rev-parse", "HEAD^{tree}"], capture_output=True,
+                              text=True).stdout.strip()
+        unchanged = tree_diff(workspace, head, snapshot_tree(workspace))
+        Path(workspace, "hooks", "pre-push").unlink()
+        removed = tree_diff(workspace, head, snapshot_tree(workspace))
+    assert "hooks/pre-push" not in unchanged and "b/.gitignore" in unchanged
+    assert "deleted file" in removed and "hooks/pre-push" in removed
+
+
 def test_validate_handoff_requires_exact_typed_schema():
     from llmjury.delegation import validate_handoff
 
