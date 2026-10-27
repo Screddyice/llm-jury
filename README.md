@@ -298,6 +298,10 @@ become the agent's next prompt:
   untracked files. A chat below a larger Git root does not index or review sibling
   task folders. Diff paths are relative to the workspace, and the real Git index
   stays untouched. Snapshot failures are reported on stderr; they are not approval.
+- The throwaway index starts from `HEAD`, so a tracked file under a `.gitignore`d
+  path (HyperScale's `.claude/git-hooks/`, `.husky/_/`, `drizzle/meta/`) stays in the
+  snapshot. Before this, `git add -A` into an empty index skipped those files and
+  every review reported them as deleted.
 - There is one review per turn. The fix pass that follows a review (`stop_hook_active`)
   is not reviewed again until the next turn.
 - The hook stays silent outside git, when nothing changed, in RS21 repositories (any
