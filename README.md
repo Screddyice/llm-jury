@@ -976,3 +976,17 @@ on-disk and KV is charged `num_ctx x OLLAMA_NUM_PARALLEL`. The original panel me
 34 GB resident on a 36 GB Mac and panicked the kernel twice; the package now refuses a
 panel that will not fit. Substitute within a lab, never swap labs — a test enforces the
 cross-lineage shape. Agent instructions live in `CLAUDE.md`.
+
+---
+
+## Disposable canary example (CR-1120-A)
+
+This section is a disposable peer-review canary. It is documentation only, it is not
+product behavior, and it must never be merged.
+
+`clamp(value, low, high)` clamps `value` to both bounds.
+
+```python
+def clamp(value, low, high):
+    return max(low, value)
+```
