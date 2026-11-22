@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "command": "python3 scripts/src_cloud_peer_checkpoint.py cursor",
+        "matcher": "Write|Edit|StrReplace|ApplyPatch",
+        "timeout": 205
+      }
+    ]
+  }
+}
