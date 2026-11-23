@@ -976,3 +976,9 @@ on-disk and KV is charged `num_ctx x OLLAMA_NUM_PARALLEL`. The original panel me
 34 GB resident on a 36 GB Mac and panicked the kernel twice; the package now refuses a
 panel that will not fit. Substitute within a lab, never swap labs — a test enforces the
 cross-lineage shape. Agent instructions live in `CLAUDE.md`.
+
+## CI
+
+Pull requests and pushes to `main` run on Crow CI, a Woodpecker-based server on Shawn's Mac. The pipeline in `.woodpecker.yaml` runs the offline test suite on Python 3.9, 3.11 and 3.12, then builds the wheel, installs it in a fresh virtualenv and checks `llmjury --version`. That is the same work as `.github/workflows/test.yml`. A green `ci/crow/...` status on the pull request's head commit is the merge check.
+
+GitHub Actions is the fallback. The workflow's `crow-gate` job waits up to three minutes for a Crow status. If one appears, the GitHub test and build jobs are skipped. If none appears (the Mac was asleep or offline), they run on GitHub as before. A manual run (`gh workflow run test.yml`) always runs them.
