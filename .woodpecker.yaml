@@ -1,0 +1,40 @@
+# Mirrors .github/workflows/test.yml on the Linux arm64 Crow agent: the offline test
+# suite on each supported Python, then a wheel build and console-command check.
+# The tests run as a non-root user, like GitHub's runner: llmjury refuses to run as
+# root because it executes model-generated code.
+steps:
+  test-py3.9:
+    image: python:3.9-bookworm
+    depends_on: []
+    commands:
+      - python -m pip install -q 'pytest>=8'
+      - useradd -m ci && chown -R ci .
+      - su ci -c 'python -m pytest -q'
+  test-py3.11:
+    image: python:3.11-bookworm
+    depends_on: []
+    commands:
+      - python -m pip install -q 'pytest>=8'
+      - useradd -m ci && chown -R ci .
+      - su ci -c 'python -m pytest -q'
+  test-py3.12:
+    image: python:3.12-bookworm
+    depends_on: []
+    commands:
+      - python -m pip install -q 'pytest>=8'
+      - useradd -m ci && chown -R ci .
+      - su ci -c 'python -m pytest -q'
+  build:
+    image: python:3.12-bookworm
+    depends_on: []
+    commands:
+      # Build from a copy under /tmp: the test steps run in parallel in the shared
+      # workspace, and build artifacts there (an unpacked sdist) break their collection.
+      - python -m pip install -q --upgrade build
+      - git archive --format=tar --prefix=src/ HEAD | tar -x -C /tmp
+      - python -m build --outdir /tmp/dist /tmp/src
+      - python -m venv /tmp/v
+      - /tmp/v/bin/pip install -q /tmp/dist/*.whl
+      - /tmp/v/bin/llmjury --version
+when:
+  event: [push, pull_request, manual]

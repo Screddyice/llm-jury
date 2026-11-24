@@ -976,3 +976,9 @@ on-disk and KV is charged `num_ctx x OLLAMA_NUM_PARALLEL`. The original panel me
 34 GB resident on a 36 GB Mac and panicked the kernel twice; the package now refuses a
 panel that will not fit. Substitute within a lab, never swap labs — a test enforces the
 cross-lineage shape. Agent instructions live in `CLAUDE.md`.
+
+## CI
+
+Pull requests and pushes run on Crow CI, a Woodpecker-based server on Shawn's Mac. `.woodpecker.yaml` runs the offline test suite on Python 3.9, 3.11 and 3.12 (as a non-root user, since llmjury refuses to run as root), then builds the wheel outside the workspace, installs it in a fresh virtualenv and checks `llmjury --version`. A green `ci/crow/...` status on the pull request's head commit is the merge check.
+
+GitHub Actions runs the same tests and build independently in `.github/workflows/test.yml`, as it always has.
