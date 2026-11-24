@@ -137,3 +137,24 @@ def test_mcp_lists_the_consult_tool_for_each_peer():
     for target in ("claude", "cursor"):
         listed = consult.reply({"id": 1, "method": "tools/list"}, target)
         assert [t["name"] for t in listed["result"]["tools"]] == ["consult_" + target]
+
+
+def test_cursor_secondary_accepts_a_tilde_project_path(repo, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "proj").mkdir(parents=True)
+    caches = home / ".t3" / "caches"
+    caches.mkdir(parents=True)
+    (caches / "alt.json").write_text(json.dumps({
+        "auth": {"status": "authenticated", "email": "alt@example.com"},
+        "models": [{"slug": "composer-2.5"}],
+    }))
+    (caches / "cursor.json").write_text(json.dumps({"auth": {"email": "main@example.com"}}))
+    write_config(home, {**OWNER_CONFIG, "cursorSecondary": {"instance": "alt", "project": "~/proj"}})
+    monkeypatch.setattr(peer, "ROOT", home)
+    commands = []
+    monkeypatch.setattr(peer, "run", lambda cmd, **kwargs: commands.append(cmd))
+
+    peer.cursor_secondary("review this")
+
+    assert len(commands) == 1
+    assert str(home / "proj") in [str(part) for part in commands[0]]

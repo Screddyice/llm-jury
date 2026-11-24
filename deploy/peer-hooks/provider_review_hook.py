@@ -137,7 +137,7 @@ def cursor_secondary(prompt):
     try:
         config = load_config()
         instance = config["cursorSecondary"]["instance"]
-        project = Path(config["cursorSecondary"]["project"])
+        project = Path(config["cursorSecondary"]["project"]).expanduser()
         assert re.fullmatch(r"[A-Za-z0-9_-]+", instance) and instance != "cursor"
         assert project.is_dir() and project.resolve().is_relative_to(ROOT)
         state = json.loads((ROOT / ".t3/caches" / f"{instance}.json").read_text())
