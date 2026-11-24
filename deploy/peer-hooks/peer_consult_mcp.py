@@ -79,8 +79,13 @@ def validate(arguments):
 def tool_call(reviewer, arguments):
     try:
         question, context = validate(arguments)
-        with tempfile.TemporaryDirectory(prefix="peer-consult-") as scratch:
-            result = reviewer(question, context, scratch)
+        result = None
+        # Peers occasionally reply in a shape that fails validation; one retry clears most of these.
+        for _attempt in range(2):
+            with tempfile.TemporaryDirectory(prefix="peer-consult-") as scratch:
+                result = reviewer(question, context, scratch)
+            if result is not None:
+                break
         if result is None:
             raise ValueError("The peer account did not return a usable response. Continue using your own checks and report the unavailable peer.")
         return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}

@@ -332,6 +332,11 @@ installed, because they import `llmjury`.
   Session markers live in `~/.llmjury/peer-consult/`.
 - Every peer answer is advisory. A missing CLI, a timeout or an error lets the turn
   continue. `LLMJURY_CROSS_REVIEW=off` pauses all of it.
+- Consultations and first-edit reviews ask the peer a second time when its first reply
+  can't be used. In live testing, about one Cursor reply in five came back in a shape
+  that failed validation; a single retry clears most of these.
+- Cursor's command-line agent (`cursor-agent -p`) runs `postToolUse` hooks but not
+  `stop` hooks, so the end-of-turn Claude review needs Cursor's editor agent.
 
 Use `--scope project` to install the Claude skill in only the current repository, or
 `--force` to replace a locally modified installed copy. Both installers are idempotent.
