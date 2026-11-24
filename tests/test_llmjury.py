@@ -2005,7 +2005,7 @@ def test_review_hook_stays_quiet_when_it_should(tmp_path, hook_env, monkeypatch)
     monkeypatch.delenv(hook_env.OPT_OUT_ENV)
     assert hook_env.decide({"session_id": "s3", "cwd": str(tmp_path)}, "Claude", reviewer) is None
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
-                    "git@github.com:teamnebula-ai/rs21-nasa.git"], check=True)
+                    "git@github.com:example-org/rs21-app.git"], check=True)
     assert hook_env.decide(base, "Claude", reviewer) is None
     assert reviewer.calls == []
 

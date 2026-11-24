@@ -34,7 +34,7 @@ PROMPT = (
 
 def ask_claude(question, context, scratch):
     def run_isolated(command, **kwargs):
-        kwargs["env"]["CLAUDE_CONFIG_DIR"] = str(peer.CLAUDE_PROFILE)
+        peer.claude_env(kwargs["env"])
         command[command.index("--tools") + 1] = ""
         return subprocess.run(command, **kwargs)
 

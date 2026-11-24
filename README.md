@@ -313,9 +313,26 @@ become the agent's next prompt:
 ### Claude Code and Cursor peer hooks
 
 `deploy/peer-hooks/` holds the scripts that make Claude Code and Cursor consult and
-review each other on a workstation. Copy both files into one folder (this machine uses
+review each other on a workstation. Copy both files into one folder (for example
 `~/.local/lib/llmjury/`) and run them with the Python that has `llm-jury-verify`
 installed, because they import `llmjury`.
+
+Machine-specific settings stay out of the repository, in `~/.config/llmjury/peer-review.json`:
+
+```json
+{
+  "owners": ["your-github-user", "your-org"],
+  "claudeConfigDir": "~/path/to/claude/profile",
+  "cursorSecondary": {"instance": "t3-instance-id", "project": "~/path/to/project"}
+}
+```
+
+- `owners` lists the GitHub owners whose checkouts may be sent to the other agent. With
+  no file, or an empty list, the hooks review nothing.
+- `claudeConfigDir` is optional. It picks the Claude profile the reviewer runs under;
+  without it the reviewer uses the caller's own profile.
+- `cursorSecondary` is optional: an alternate Cursor login used through T3 when the
+  primary is unavailable.
 
 | What | Claude Code side | Cursor side |
 |---|---|---|
@@ -323,9 +340,8 @@ installed, because they import `llmjury`.
 | Review the first edit of a session | PostToolUse hook `peer_consult_mcp.py after-edit-claude` (matcher `Edit\|Write\|MultiEdit`) | `postToolUse` hook `peer_consult_mcp.py after-edit-cursor` |
 | Review the turn's changes at the end | Stop hook `provider_review_hook.py claude` (Grok and Cursor review) | `stop` hook `provider_review_hook.py cursor` (Claude reviews) |
 
-- Everything runs only in checkouts whose `origin` belongs to `screddyice`,
-  `teamnebula-ai`, `reddy2help` or `reddy2help-inc`. RS21 and client repositories are
-  never sent to the other provider.
+- Everything runs only in checkouts whose `origin` owner is in `owners`. List only
+  repositories whose code may go to both providers, and leave client repositories out.
 - The first-edit review runs once per session, for common source files (Python, JS/TS,
   Go, Rust, Swift, Kotlin, Java, Ruby, SQL, CSS/HTML, YAML, Terraform and similar). It
   skips files under dot-folders, credential-looking paths, and edits containing secrets.
@@ -461,13 +477,16 @@ host pressure, router ownership, and simulator co-residency remain hard refusals
 selector never overrides those guards. This keeps a local model in the path when the host
 can safely load one, while preserving the verifier gate for every candidate.
 
-The Mac LaunchAgent `com.screddy.llmjury-monthly-refresh` runs this same-family refresh on
+The LaunchAgent template `deploy/llmjury-monthly-refresh.plist.template` runs this same-family refresh on
 the first day of each month at 09:00 local time. It runs `ollama pull` for the configured
 tags, admits the largest safe panel, and runs a local-only verifier smoke test. It writes
 only local status to `~/.llmjury/monthly-refresh.json`; it has no OpenRouter or email path.
 The LaunchAgent pins two Ollama decode slots and a 1 GiB prompt-cache reserve, while each
 report records RAM availability, memory pressure, model residency inputs, and simulator
-co-residency so hardware refusals remain explainable.
+co-residency so hardware refusals remain explainable. To install it, replace `__HOME__`
+with your home folder and `__REPO__` with this checkout's path, save it as
+`~/Library/LaunchAgents/com.llmjury.monthly-refresh.plist`, and load it with
+`launchctl bootstrap gui/$(id -u)` and that path.
 If the preferred configured model does not fit but another configured panel member does,
 the guarded fallback selects that admitted member. Warning-level memory pressure still
 refuses every local allocation.
