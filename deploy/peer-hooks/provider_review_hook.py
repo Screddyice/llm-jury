@@ -17,9 +17,7 @@ CLAUDE = ROOT / ".local/bin/claude"
 CURSOR = ROOT / ".local/bin/cursor-agent"
 GROK = ROOT / ".grok/bin/grok"
 T3 = ROOT / ".t3/bin/t3"
-CLAUDE_PROFILE = ROOT / "TeamNebula/team-context"
 REPO_OWNER = re.compile(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([^/]+)/[^/]+$")
-OWNERS = {"screddyice", "teamnebula-ai", "reddy2help", "reddy2help-inc"}
 CREDENTIAL_PATH = re.compile(
     r"(?i)(^|/)(\.private|\.env(?:\..*)?|auth\.json|.*credentials.*|.*secrets.*|id_(?:rsa|ed25519))(?:/|$)|\.(?:pem|key|pfx|p12)$"
 )
@@ -49,12 +47,50 @@ def run(command, *, cwd, env=None, text=None, timeout=70):
         return None
 
 
+def load_config():
+    """Machine-specific settings live in CONFIG, outside the repository.
+
+    `owners`: GitHub owners whose checkouts may be sent to the other agent (none when unset).
+    `claudeConfigDir`: Claude profile the reviewer runs under (the caller's own when unset).
+    `cursorSecondary`: optional alternate Cursor login through T3.
+    """
+    try:
+        data = json.loads(CONFIG.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def owners():
+    values = load_config().get("owners")
+    if not isinstance(values, list):
+        return set()
+    return {value.lower() for value in values if isinstance(value, str)}
+
+
+def claude_config_dir():
+    value = load_config().get("claudeConfigDir")
+    if isinstance(value, str) and Path(value).expanduser().is_dir():
+        return str(Path(value).expanduser())
+    return None
+
+
+def claude_env(env):
+    profile = claude_config_dir()
+    if profile:
+        env["CLAUDE_CONFIG_DIR"] = profile
+    return env
+
+
 def repo_allowed(cwd):
+    allowed = owners()
+    if not allowed:
+        return False
     output = run(["/usr/bin/git", "-C", cwd, "remote", "get-url", "origin"], cwd=cwd, timeout=5)
     if output is None or output.returncode != 0:
         return False
     match = REPO_OWNER.fullmatch(output.stdout.strip())
-    return bool(match and match.group(1).lower() in OWNERS)
+    return bool(match and match.group(1).lower() in allowed)
 
 
 def safe_diff(cwd, before, after):
@@ -99,11 +135,11 @@ def result_from_process(reply, field):
 
 def cursor_secondary(prompt):
     try:
-        config = json.loads(CONFIG.read_text())
+        config = load_config()
         instance = config["cursorSecondary"]["instance"]
-        project = Path(config["cursorSecondary"]["project"])
+        project = Path(config["cursorSecondary"]["project"]).expanduser()
         assert re.fullmatch(r"[A-Za-z0-9_-]+", instance) and instance != "cursor"
-        assert project.is_dir() and project.resolve().is_relative_to(ROOT / "projects/_workspace")
+        assert project.is_dir() and project.resolve().is_relative_to(ROOT)
         state = json.loads((ROOT / ".t3/caches" / f"{instance}.json").read_text())
         auth = state.get("auth", {})
         primary = json.loads((ROOT / ".t3/caches/cursor.json").read_text()).get("auth", {})
@@ -129,7 +165,7 @@ class ClaudePeer:
     def review(self, _task, diff, _cwd):
         # Use the signed-in Claude profile. Prevent the reviewer from launching hooks or MCPs.
         def isolated_runner(command, **kwargs):
-            kwargs["env"]["CLAUDE_CONFIG_DIR"] = str(CLAUDE_PROFILE)
+            claude_env(kwargs["env"])
             command[command.index("--tools") + 1] = ""
             return subprocess.run(command, **kwargs)
 
