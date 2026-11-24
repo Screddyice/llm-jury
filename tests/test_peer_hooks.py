@@ -73,6 +73,31 @@ def test_first_edit_review_runs_outside_llm_jury_once_per_session(repo, monkeypa
     assert calls == [str(repo)]
 
 
+def test_consult_retries_once_when_the_peer_reply_is_unusable(repo):
+    replies = [None, {"verdict": "approve", "summary": "ok", "findings": []}]
+
+    def flaky(question, context, scratch):
+        return replies.pop(0)
+
+    result = consult.tool_call(flaky, {"repo_path": str(repo), "question": "Sort first?"})
+
+    assert result["isError"] is False
+    assert json.loads(result["content"][0]["text"])["summary"] == "ok"
+    assert replies == []
+
+
+def test_consult_reports_the_peer_unavailable_after_two_unusable_replies(repo):
+    calls = []
+
+    def dead(question, context, scratch):
+        calls.append(question)
+
+    result = consult.tool_call(dead, {"repo_path": str(repo), "question": "Sort first?"})
+
+    assert result["isError"] is True
+    assert len(calls) == 2
+
+
 def test_mcp_lists_the_consult_tool_for_each_peer():
     for target in ("claude", "cursor"):
         listed = consult.reply({"id": 1, "method": "tools/list"}, target)
