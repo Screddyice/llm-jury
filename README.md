@@ -979,8 +979,6 @@ cross-lineage shape. Agent instructions live in `CLAUDE.md`.
 
 ## CI
 
-Pull requests and pushes to `main` run on Crow CI, a Woodpecker-based server on Shawn's Mac. The pipeline in `.woodpecker.yaml` runs the offline test suite on Python 3.9, 3.11 and 3.12, then builds the wheel, installs it in a fresh virtualenv and checks `llmjury --version`. That is the same work as `.github/workflows/test.yml`. A green `ci/crow/...` status on the pull request's head commit is the merge check.
+Pull requests and pushes run on Crow CI, a Woodpecker-based server on Shawn's Mac. `.woodpecker.yaml` runs the offline test suite on Python 3.9, 3.11 and 3.12 (as a non-root user, since llmjury refuses to run as root), then builds the wheel outside the workspace, installs it in a fresh virtualenv and checks `llmjury --version`. A green `ci/crow/...` status on the pull request's head commit is the merge check.
 
-GitHub Actions is the fallback. The workflow's `crow-gate` job waits up to three minutes for a Crow status. If one appears, the GitHub test and build jobs are skipped. If none appears (the Mac was asleep or offline), they run on GitHub as before. A manual run (`gh workflow run test.yml`) always runs them.
-
-If Crow fails for its own reasons (clone dropped, run killed or timed out, Crow unreachable), the `Crow fallback` workflow (`.github/workflows/crow-fallback.yml`) reads the failed run from Crow's API and starts GitHub CI on the PR head with `gh workflow run test.yml`. A failed check step does not trigger it. It needs a `CROW_TOKEN` repo secret and, like every `status`-triggered workflow, runs from the default branch, so it takes effect once this is merged.
+GitHub Actions runs the same tests and build independently in `.github/workflows/test.yml`, as it always has.
