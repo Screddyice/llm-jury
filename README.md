@@ -310,6 +310,29 @@ become the agent's next prompt:
 - An approval, a missing CLI, a timeout, or any other error lets the agent stop
   normally. The hook never breaks a session.
 
+### Claude Code and Cursor peer hooks
+
+`deploy/peer-hooks/` holds the scripts that make Claude Code and Cursor consult and
+review each other on a workstation. Copy both files into one folder (this machine uses
+`~/.local/lib/llmjury/`) and run them with the Python that has `llm-jury-verify`
+installed, because they import `llmjury`.
+
+| What | Claude Code side | Cursor side |
+|---|---|---|
+| Ask the other mid-task | MCP server `peer_consult_mcp.py cursor` exposes `consult_cursor` | MCP server `peer_consult_mcp.py claude` exposes `consult_claude` |
+| Review the first edit of a session | PostToolUse hook `peer_consult_mcp.py after-edit-claude` (matcher `Edit\|Write\|MultiEdit`) | `postToolUse` hook `peer_consult_mcp.py after-edit-cursor` |
+| Review the turn's changes at the end | Stop hook `provider_review_hook.py claude` (Grok and Cursor review) | `stop` hook `provider_review_hook.py cursor` (Claude reviews) |
+
+- Everything runs only in checkouts whose `origin` belongs to `screddyice`,
+  `teamnebula-ai`, `reddy2help` or `reddy2help-inc`. RS21 and client repositories are
+  never sent to the other provider.
+- The first-edit review runs once per session, for common source files (Python, JS/TS,
+  Go, Rust, Swift, Kotlin, Java, Ruby, SQL, CSS/HTML, YAML, Terraform and similar). It
+  skips files under dot-folders, credential-looking paths, and edits containing secrets.
+  Session markers live in `~/.llmjury/peer-consult/`.
+- Every peer answer is advisory. A missing CLI, a timeout or an error lets the turn
+  continue. `LLMJURY_CROSS_REVIEW=off` pauses all of it.
+
 Use `--scope project` to install the Claude skill in only the current repository, or
 `--force` to replace a locally modified installed copy. Both installers are idempotent.
 
