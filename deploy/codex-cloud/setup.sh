@@ -25,8 +25,9 @@ fi
 shared="${LLMJURY_SHARED_BIN:-/usr/local/bin}"
 link="$shared/cursor-consult"
 if [ -d "$shared" ] && [ -w "$shared" ]; then
-  if [ ! -e "$link" ] && [ ! -L "$link" ]; then
-    ln -s "$bin/cursor-consult" "$link"
+  # Another setup run may create the same link between the check and ln; accept ours.
+  if [ ! -e "$link" ] && [ ! -L "$link" ] && ln -s "$bin/cursor-consult" "$link" 2>/dev/null; then
+    :
   elif [ "$(readlink "$link" 2>/dev/null)" != "$bin/cursor-consult" ]; then
     echo "setup: $link already exists and is not ours; leaving it. Use ~/.local/bin/cursor-consult." >&2
   fi
