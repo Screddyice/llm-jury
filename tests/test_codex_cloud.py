@@ -22,7 +22,8 @@ def fake(tmp_path):
     agent.chmod(0o755)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path / "home"),
            "ARGS_FILE": str(tmp_path / "args"), "CURSOR_API_KEY": "test-key",
-           "LLMJURY_SHARED_BIN": str(tmp_path / "shared-bin")}
+           "LLMJURY_SHARED_BIN": str(tmp_path / "shared-bin"),
+           "LLMJURY_FALLBACK_HOME": str(tmp_path / "fallback-home")}
     return tmp_path, env
 
 
@@ -144,3 +145,27 @@ def test_setup_reports_the_real_link_error(fake):
     assert "Read-only file system" in result.stderr
     assert "not ours" not in result.stderr
     assert os.access(Path(env["HOME"]) / ".local" / "bin" / "cursor-consult", os.X_OK)
+
+
+def test_setup_and_consult_work_with_a_read_only_home(fake):
+    tmp, env = fake
+    home = Path(env["HOME"])
+    home.mkdir()
+    home.chmod(0o555)
+    fallback = tmp / "fallback-home"
+    env["LLMJURY_FALLBACK_HOME"] = str(fallback)
+    (tmp / "bin" / "cursor-agent").write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$HOME" > "$ARGS_FILE.home"\nprintf "%s\\n" "$@" > "$ARGS_FILE"\necho ok\n')
+    try:
+        result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        helper = fallback / ".local" / "bin" / "cursor-consult"
+        assert os.access(helper, os.X_OK)
+        assert str(helper) in result.stdout
+        run = subprocess.run([str(helper), "question"], env=env,
+                             capture_output=True, text=True, timeout=30)
+        assert run.returncode == 0, run.stderr
+        assert (tmp / "args.home").read_text().strip() == str(fallback)
+    finally:
+        home.chmod(0o755)
