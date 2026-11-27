@@ -222,7 +222,8 @@ def codex_path():
     found = shutil.which(CODEX)
     if found:
         return found
-    return next((str(place) for place in CODEX_PLACES if place.is_file()), None)
+    return next((str(place) for place in CODEX_PLACES
+                 if place.is_file() and os.access(place, os.X_OK)), None)
 
 
 def ask_codex(instructions, content, scratch, model):
