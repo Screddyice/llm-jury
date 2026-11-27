@@ -130,3 +130,17 @@ def test_setup_accepts_a_link_made_by_a_concurrent_run(fake):
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert (shared / "cursor-consult").is_symlink()
+
+
+def test_setup_reports_the_real_link_error(fake):
+    tmp, env = fake
+    (tmp / "shared-bin").mkdir()
+    failing_ln = tmp / "bin" / "ln"
+    failing_ln.write_text('#!/bin/sh\necho "ln: Read-only file system" >&2\nexit 1\n')
+    failing_ln.chmod(0o755)
+    result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert "Read-only file system" in result.stderr
+    assert "not ours" not in result.stderr
+    assert os.access(Path(env["HOME"]) / ".local" / "bin" / "cursor-consult", os.X_OK)
