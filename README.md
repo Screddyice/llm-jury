@@ -313,9 +313,23 @@ become the agent's next prompt:
 ### Claude Code and Cursor peer hooks
 
 `deploy/peer-hooks/` holds the scripts that make Claude Code and Cursor consult and
-review each other on a workstation. Copy both files into one folder (for example
-`~/.local/lib/llmjury/`) and run them with the Python that has `llm-jury-verify`
-installed, because they import `llmjury`.
+review each other on a workstation. They import `llmjury`, so they run with the Python
+that has `llm-jury-verify` installed. To set everything up, run the installer with that
+Python:
+
+```bash
+python deploy/peer-hooks/install.py --dry-run   # list the files it would change
+python deploy/peer-hooks/install.py
+```
+
+It copies both scripts to `~/.local/lib/llmjury/`, then registers the `peer-consult` MCP
+server and the first-edit and end-of-turn hooks for Claude Code (`~/.claude/settings.json`,
+`~/.claude.json`, plus the profile named by `claudeConfigDir`), Cursor (`~/.cursor/`) and
+Codex (`~/.codex/`). It replaces only its own entries and the legacy
+`llmjury review-hook --host codex` Stop hook, keeps every other hook and server, backs a
+file up as `<file>.bak-<time>-peer` before changing it, and changes nothing on a second
+run. Re-run it after pulling a change to the hook scripts. Afterwards, restart the agents
+and trust the new hooks in Codex's `/hooks` screen.
 
 Machine-specific settings stay out of the repository, in `~/.config/llmjury/peer-review.json`:
 
