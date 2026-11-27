@@ -409,7 +409,8 @@ opinion, the same way the Mac hooks do.
 What a live test on 2026-11-26 showed about the current Codex cloud: files the
 environment's install script creates are not present in tasks, the "Start skill" is not
 applied to tasks, and a task's home folder is read-only. So each task installs the helper
-itself, under `/tmp/llmjury-home` when its home is read-only.
+itself, under a private folder in `/tmp` (mode 700, owned by the task's user; a fresh
+`mktemp` folder if the usual one looks shared) when its home is read-only.
 
 1. **Codex custom instructions** (ChatGPT settings, applied to every Codex task):
    "If `CURSOR_API_KEY` is set, first run

@@ -12,11 +12,14 @@ if [ $# -lt 1 ] || [ -z "$1" ]; then
   exit 64
 fi
 
-# With a read-only home, setup installed Cursor under the fallback home; Cursor keeps its config there too.
-fallback="${LLMJURY_FALLBACK_HOME:-/tmp/llmjury-home}"
-if ! { [ -d "$HOME" ] && [ -w "$HOME" ]; } && [ -d "$fallback" ]; then
-  HOME="$fallback"
-  export HOME
+# With a read-only home, setup installed this helper and Cursor under a private fallback
+# home (<home>/.local/bin/cursor-consult). Use that folder, found from where this file is.
+if ! { [ -d "$HOME" ] && [ -w "$HOME" ]; }; then
+  own_home="$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd || true)"
+  if [ -n "$own_home" ] && [ -O "$own_home" ] && [ -w "$own_home" ]; then
+    HOME="$own_home"
+    export HOME
+  fi
 fi
 
 agent="${CURSOR_AGENT:-}"
