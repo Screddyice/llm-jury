@@ -12,6 +12,13 @@ if [ $# -lt 1 ] || [ -z "$1" ]; then
   exit 64
 fi
 
+# With a read-only home, setup installed Cursor under the fallback home; Cursor keeps its config there too.
+fallback="${LLMJURY_FALLBACK_HOME:-/tmp/llmjury-home}"
+if ! { [ -d "$HOME" ] && [ -w "$HOME" ]; } && [ -d "$fallback" ]; then
+  HOME="$fallback"
+  export HOME
+fi
+
 agent="${CURSOR_AGENT:-}"
 if [ -z "$agent" ]; then
   for candidate in cursor-agent agent "$HOME/.local/bin/cursor-agent" "$HOME/.local/bin/agent"; do

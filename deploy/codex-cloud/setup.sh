@@ -5,6 +5,13 @@
 set -euo pipefail
 
 raw="${LLMJURY_RAW:-https://raw.githubusercontent.com/Screddyice/llm-jury/main/deploy/codex-cloud}"
+# Codex cloud tasks run with a read-only home; install under a writable folder instead.
+mkdir -p "$HOME" 2>/dev/null || true
+if ! { [ -d "$HOME" ] && [ -w "$HOME" ]; }; then
+  HOME="${LLMJURY_FALLBACK_HOME:-/tmp/llmjury-home}"
+  mkdir -p "$HOME"
+  export HOME
+fi
 bin="$HOME/.local/bin"
 mkdir -p "$bin" "$HOME/.codex"
 export PATH="$bin:$PATH"

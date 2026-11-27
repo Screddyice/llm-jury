@@ -404,22 +404,28 @@ use → peer list) and `models` (peer → use → model, or a per-author dict wi
 ### Codex cloud tasks asking Cursor
 
 `deploy/codex-cloud/` lets a Codex cloud task ask Cursor for a read-only second
-opinion, the same way the Mac hooks do. In the Codex environment settings
-(chatgpt.com/codex, Settings → Environments):
+opinion, the same way the Mac hooks do.
 
-1. **Setup script:**
-   `curl -fsSL https://raw.githubusercontent.com/Screddyice/llm-jury/main/deploy/codex-cloud/setup.sh | bash`.
-   It installs the Cursor CLI and `cursor-consult` into `~/.local/bin`, links the helper
-   into `/usr/local/bin` (task shells do not read `~/.bashrc`) unless another
-   `cursor-consult` is already there (a link made by a second setup run at the same
-   moment counts as its own; any other failure is reported, and Codex still has the
-   full `~/.local/bin` path), and adds a short
-   note to `~/.codex/AGENTS.md` telling Codex when to use it.
-2. **Environment variable** `CURSOR_API_KEY` with a Cursor API key. Make it an
-   environment variable, not a secret: Codex removes secrets before the task starts.
-3. **Agent internet access** on, with these domains allowed: `api2.cursor.sh`,
-   `api3.cursor.sh`, `api.cursor.com`, `cursor.com`, `downloads.cursor.com`. Leave all
-   HTTP methods allowed, because the Cursor CLI sends POST requests.
+What a live test on 2026-11-26 showed about the current Codex cloud: files the
+environment's install script creates are not present in tasks, the "Start skill" is not
+applied to tasks, and a task's home folder is read-only. So each task installs the helper
+itself, under `/tmp/llmjury-home` when its home is read-only.
+
+1. **Codex custom instructions** (ChatGPT settings, applied to every Codex task):
+   "If `CURSOR_API_KEY` is set, first run
+   `curl -fsSL https://raw.githubusercontent.com/Screddyice/llm-jury/main/deploy/codex-cloud/setup.sh | bash`,
+   then use the `cursor-consult` path it prints for a second opinion before material
+   decisions, when stuck, and before finishing." Environments without the key skip it.
+2. **HTTP secret** `CURSOR_API_KEY` in each environment that may use Cursor, allowed only
+   for `api2.cursor.sh`, `api3.cursor.sh` and `api.cursor.com`. The proxy swaps in the
+   real key for those hosts, so the key itself never sits in the container.
+3. **Additional allowed domains:** `cursor.com`, `*.cursor.com`, `*.cursor.sh` and
+   `raw.githubusercontent.com`, with all HTTP methods (the Cursor CLI sends POST requests).
+
+`setup.sh` installs the Cursor CLI and `cursor-consult` into `~/.local/bin` (or the
+fallback home), links the helper into `/usr/local/bin` when that folder is writable and
+holds no other `cursor-consult` (a link made by a second setup run at the same moment
+counts as its own; any other failure is reported), and prints the helper's path.
 
 Inside a task, Codex runs `cursor-consult "question" file ...` (or `-` to read context
 from stdin). It sends at most 16,000 characters of context in total
