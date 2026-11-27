@@ -23,8 +23,13 @@ fi
 
 # Non-interactive task shells skip ~/.bashrc, so also link the helper onto the default PATH.
 shared="${LLMJURY_SHARED_BIN:-/usr/local/bin}"
+link="$shared/cursor-consult"
 if [ -d "$shared" ] && [ -w "$shared" ]; then
-  ln -sf "$bin/cursor-consult" "$shared/cursor-consult"
+  if [ ! -e "$link" ] && [ ! -L "$link" ]; then
+    ln -s "$bin/cursor-consult" "$link"
+  elif [ "$(readlink "$link" 2>/dev/null)" != "$bin/cursor-consult" ]; then
+    echo "setup: $link already exists and is not ours; leaving it. Use ~/.local/bin/cursor-consult." >&2
+  fi
 fi
 
 if ! grep -qs 'HOME/.local/bin' "$HOME/.bashrc"; then
