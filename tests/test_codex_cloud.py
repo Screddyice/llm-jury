@@ -147,6 +147,7 @@ def test_setup_reports_the_real_link_error(fake):
     assert os.access(Path(env["HOME"]) / ".local" / "bin" / "cursor-consult", os.X_OK)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write to a 0555 folder")
 def test_setup_and_consult_work_with_a_read_only_home(fake):
     tmp, env = fake
     home = Path(env["HOME"])
@@ -167,5 +168,30 @@ def test_setup_and_consult_work_with_a_read_only_home(fake):
                              capture_output=True, text=True, timeout=30)
         assert run.returncode == 0, run.stderr
         assert (tmp / "args.home").read_text().strip() == str(fallback)
+    finally:
+        home.chmod(0o755)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write to a 0555 folder")
+def test_setup_avoids_a_fallback_folder_others_can_write(fake):
+    tmp, env = fake
+    home = Path(env["HOME"])
+    home.mkdir()
+    home.chmod(0o555)
+    hostile = Path(env["LLMJURY_FALLBACK_HOME"])
+    hostile.mkdir()
+    hostile.chmod(0o777)
+    env["TMPDIR"] = str(tmp)
+    try:
+        result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        assert not (hostile / ".local").exists()
+        installed = Path(result.stdout.strip().splitlines()[-1].split(" at ", 1)[1])
+        private = installed.parents[2]
+        assert private.parent == tmp and private.stat().st_mode & 0o777 == 0o700
+        run = subprocess.run([str(installed), "question"], env=env,
+                             capture_output=True, text=True, timeout=30)
+        assert run.returncode == 0, run.stderr
     finally:
         home.chmod(0o755)

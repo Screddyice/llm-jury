@@ -8,8 +8,15 @@ raw="${LLMJURY_RAW:-https://raw.githubusercontent.com/Screddyice/llm-jury/main/d
 # Codex cloud tasks run with a read-only home; install under a writable folder instead.
 mkdir -p "$HOME" 2>/dev/null || true
 if ! { [ -d "$HOME" ] && [ -w "$HOME" ]; }; then
-  HOME="${LLMJURY_FALLBACK_HOME:-/tmp/llmjury-home}"
-  mkdir -p "$HOME"
+  # Use a folder only this user can write. If the usual name already exists and is not a
+  # private folder of ours (another user may have made it), take a fresh one instead.
+  HOME="${LLMJURY_FALLBACK_HOME:-${TMPDIR:-/tmp}/llmjury-home-$(id -u)}"
+  if ! mkdir -m 700 "$HOME" 2>/dev/null; then
+    mode="$(stat -c %a "$HOME" 2>/dev/null || stat -f %Lp "$HOME" 2>/dev/null || true)"
+    if [ -L "$HOME" ] || [ ! -d "$HOME" ] || [ ! -O "$HOME" ] || [ "$mode" != 700 ]; then
+      HOME="$(mktemp -d "${TMPDIR:-/tmp}/llmjury-home.XXXXXX")"
+    fi
+  fi
   export HOME
 fi
 bin="$HOME/.local/bin"
