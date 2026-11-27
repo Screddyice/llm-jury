@@ -21,7 +21,8 @@ def fake(tmp_path):
     agent.write_text(FAKE_AGENT)
     agent.chmod(0o755)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path / "home"),
-           "ARGS_FILE": str(tmp_path / "args"), "CURSOR_API_KEY": "test-key"}
+           "ARGS_FILE": str(tmp_path / "args"), "CURSOR_API_KEY": "test-key",
+           "LLMJURY_SHARED_BIN": str(tmp_path / "shared-bin")}
     return tmp_path, env
 
 
@@ -95,10 +96,23 @@ def test_consult_caps_the_combined_context(fake):
 
 def test_setup_puts_the_helper_on_the_default_path(fake):
     tmp, env = fake
-    shared = tmp / "usr-local-bin"
+    shared = tmp / "shared-bin"
     shared.mkdir()
-    env["LLMJURY_SHARED_BIN"] = str(shared)
     result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert os.access(shared / "cursor-consult", os.X_OK)
+
+
+def test_setup_leaves_another_cursor_consult_alone(fake):
+    tmp, env = fake
+    shared = tmp / "shared-bin"
+    shared.mkdir()
+    other = shared / "cursor-consult"
+    other.write_text("#!/bin/sh\necho someone else\n")
+    for _ in range(2):
+        result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+    assert not other.is_symlink() and "someone else" in other.read_text()
+    assert "not ours" in result.stderr
