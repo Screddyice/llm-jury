@@ -338,7 +338,29 @@ Machine-specific settings stay out of the repository, in `~/.config/llmjury/peer
 |---|---|---|
 | Ask the other mid-task | MCP server `peer_consult_mcp.py cursor` exposes `consult_cursor` | MCP server `peer_consult_mcp.py claude` exposes `consult_claude` |
 | Review the first edit of a session | PostToolUse hook `peer_consult_mcp.py after-edit-claude` (matcher `Edit\|Write\|MultiEdit`) | `postToolUse` hook `peer_consult_mcp.py after-edit-cursor` |
-| Review the turn's changes at the end | Stop hook `provider_review_hook.py claude` (Grok and Cursor review) | `stop` hook `provider_review_hook.py cursor` (Claude reviews) |
+| Review the turn's changes at the end | Stop hook `provider_review_hook.py claude` | `stop` hook `provider_review_hook.py cursor` |
+
+Codex uses the same end-of-turn hook: register `provider_review_hook.py codex` as a
+Stop hook in `~/.codex/hooks.json`.
+
+Each author's end-of-turn review goes to the first available peer in its chain. A peer
+counts as unavailable when its CLI is missing, it is signed out, it times out, or its
+reply is unusable; the next one is asked instead, and the review names who answered. Editors can start
+hooks with a short `PATH`, so the hook also looks for `codex` in `~/.local/bin`,
+`/opt/homebrew/bin` and `/usr/local/bin` before calling Codex missing.
+
+| Author | Review chain | Question chain |
+|---|---|---|
+| Claude | Codex → Cursor → Grok | Codex → Grok → Cursor |
+| Cursor | Claude → Codex | Claude → Codex |
+| Codex | Claude → Cursor | Claude → Cursor |
+| Grok | Claude → Codex | Claude → Codex |
+
+Cursor defaults to `composer-2.5` and Grok to `grok-4.7`, because Cursor plans without
+extra credits include only Composer and Grok models. Codex and Claude use their CLI's
+default model. Override either table in the config file below with `chains` (author →
+use → peer list) and `models` (peer → use → model, or a per-author dict with a
+`default` entry), for example `"models": {"cursor": {"review": {"codex": "claude-opus-5-thinking-high", "default": "gpt-5.6-sol-high"}}}`.
 
 - Everything runs only in checkouts whose `origin` owner is in `owners`. List only
   repositories whose code may go to both providers, and leave client repositories out.

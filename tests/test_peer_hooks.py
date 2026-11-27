@@ -158,3 +158,92 @@ def test_cursor_secondary_accepts_a_tilde_project_path(repo, tmp_path, monkeypat
 
     assert len(commands) == 1
     assert str(home / "proj") in [str(part) for part in commands[0]]
+
+
+def fake_peers(monkeypatch, answers):
+    """answers: peer -> review dict or None (unavailable). Records (peer, use, model)."""
+    calls = []
+
+    def ask(name, instructions, content, use, author):
+        calls.append((name, use, peer.model_for(name, use, author)))
+        return answers.get(name)
+
+    monkeypatch.setattr(peer, "ask_peer", ask)
+    return calls
+
+
+APPROVE = {"verdict": "approve", "summary": "fine", "findings": []}
+REJECT = {"verdict": "changes_requested", "summary": "bug", "findings": ["a.py: wrong sign"]}
+
+
+def test_claude_reviews_go_to_codex_first(repo, monkeypatch):
+    calls = fake_peers(monkeypatch, {"codex": REJECT, "cursor": APPROVE})
+    result = peer.PeerChain("claude").review("task", "diff", str(repo))
+    assert [c[0] for c in calls] == ["codex"]
+    assert result.verdict == "changes_requested"
+    assert result.findings == ["a.py: wrong sign"]
+
+
+def test_unavailable_peer_falls_through_to_the_next(repo, monkeypatch):
+    calls = fake_peers(monkeypatch, {"codex": None, "cursor": None, "grok": APPROVE})
+    chain = peer.PeerChain("claude")
+    result = chain.review("task", "diff", str(repo))
+    assert [c[0] for c in calls] == ["codex", "cursor", "grok"]
+    assert result.verdict == "approve" and chain.name == "Grok"
+
+
+def test_no_peer_available_is_an_error_not_an_approval(repo, monkeypatch):
+    fake_peers(monkeypatch, {})
+    assert peer.PeerChain("cursor").review("task", "diff", str(repo)).verdict == "error"
+
+
+def test_each_author_has_its_own_default_order():
+    assert peer.chain("claude", "review") == ["codex", "cursor", "grok"]
+    assert peer.chain("claude", "consult") == ["codex", "grok", "cursor"]
+    assert peer.chain("cursor", "review") == ["claude", "codex"]
+    assert peer.chain("codex", "review") == ["claude", "cursor"]
+
+
+def test_cursor_defaults_to_a_plan_included_model():
+    assert peer.model_for("cursor", "review", "claude") == "composer-2.5"
+    assert peer.model_for("cursor", "consult", "codex") == "composer-2.5"
+
+
+def test_a_model_can_depend_on_the_author(repo, tmp_path):
+    write_config(tmp_path / "home", {**OWNER_CONFIG, "models": {
+        "cursor": {"review": {"codex": "claude-x", "default": "gpt-x"}}}})
+    assert peer.model_for("cursor", "review", "codex") == "claude-x"
+    assert peer.model_for("cursor", "review", "claude") == "gpt-x"
+
+
+def test_config_can_override_order_and_models(repo, tmp_path):
+    write_config(tmp_path / "home", {
+        **OWNER_CONFIG,
+        "chains": {"claude": {"review": ["cursor"]}},
+        "models": {"cursor": {"review": "my-model"}},
+    })
+    assert peer.chain("claude", "review") == ["cursor"]
+    assert peer.chain("claude", "consult") == ["codex", "grok", "cursor"]
+    assert peer.model_for("cursor", "review", "codex") == "my-model"
+
+
+def test_codex_stop_hook_blocks_with_the_review(repo, monkeypatch, capsys):
+    fake_peers(monkeypatch, {"claude": REJECT})
+    git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base", "--allow-empty")
+    (repo / "main.go").write_text("package main\n\nfunc avg(xs []int) int { return -1 }\n")
+    event = {"cwd": str(repo), "session_id": "codex-1", "hook_event_name": "Stop"}
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps(event)))
+    monkeypatch.delenv("LLMJURY_NESTED", raising=False)
+    peer.main("codex")
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "Claude" in out["reason"]
+
+
+def test_codex_is_found_outside_a_short_path(tmp_path, monkeypatch):
+    codex = tmp_path / "codex"
+    codex.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", codex))
+    assert peer.codex_path() == str(codex)
+    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing",))
+    assert peer.codex_path() is None

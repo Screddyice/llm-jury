@@ -1,21 +1,25 @@
-"""Read-only peer review for local Claude Code, Grok Build, and Cursor Stop hooks."""
+"""Read-only peer review for local Claude Code, Codex, Cursor and Grok Build Stop hooks."""
 
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 
 from llmjury import review_hook
-from llmjury.delegation import ClaudeDelegator, ReviewResult, validate_review
+from llmjury.delegation import ClaudeDelegator, CodexDelegator, ReviewResult, validate_review
 
 ROOT = Path.home()
 CONFIG = ROOT / ".config/llmjury/peer-review.json"
 CLAUDE = ROOT / ".local/bin/claude"
 CURSOR = ROOT / ".local/bin/cursor-agent"
 GROK = ROOT / ".grok/bin/grok"
+CODEX = "codex"
+# Hooks started by an editor can run with a short PATH, so look where installers put Codex too.
+CODEX_PLACES = (ROOT / ".local/bin/codex", Path("/opt/homebrew/bin/codex"), Path("/usr/local/bin/codex"))
 T3 = ROOT / ".t3/bin/t3"
 REPO_OWNER = re.compile(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([^/]+)/[^/]+$")
 CREDENTIAL_PATH = re.compile(
@@ -80,6 +84,43 @@ def claude_env(env):
     if profile:
         env["CLAUDE_CONFIG_DIR"] = profile
     return env
+
+
+# Who answers each author, in order. A peer that is missing, signed out, times out
+# or returns no usable reply is skipped for the next one.
+DEFAULT_CHAINS = {
+    "claude": {"review": ["codex", "cursor", "grok"], "consult": ["codex", "grok", "cursor"]},
+    "cursor": {"review": ["claude", "codex"], "consult": ["claude", "codex"]},
+    "codex": {"review": ["claude", "cursor"], "consult": ["claude", "cursor"]},
+    "grok": {"review": ["claude", "codex"], "consult": ["claude", "codex"]},
+}
+# Model per peer and use. A value may also be a dict keyed by author ("default" for
+# the rest), to keep a reviewer off the author's own model family. Cursor defaults to
+# Composer because plans without credits include only Composer and Grok models.
+DEFAULT_MODELS = {
+    "cursor": {"review": "composer-2.5", "consult": "composer-2.5"},
+    "grok": {"review": "grok-4.7", "consult": "grok-4.7"},
+    "codex": {"review": None, "consult": None},
+    "claude": {"review": None, "consult": None},
+}
+PEER_NAMES = {"claude": "Claude", "codex": "Codex", "cursor": "Cursor", "grok": "Grok"}
+
+
+def chain(author, use):
+    configured = (load_config().get("chains") or {}).get(author, {})
+    order = configured.get(use) if isinstance(configured, dict) else None
+    if not isinstance(order, list):
+        order = DEFAULT_CHAINS.get(author, {}).get(use, [])
+    return [peer for peer in order if peer in PEER_NAMES and peer != author]
+
+
+def model_for(peer, use, author):
+    configured = (load_config().get("models") or {}).get(peer, {})
+    value = configured.get(use) if isinstance(configured, dict) and use in configured else \
+        DEFAULT_MODELS.get(peer, {}).get(use)
+    if isinstance(value, dict):
+        value = value.get(author, value.get("default"))
+    return value if isinstance(value, str) else None
 
 
 def repo_allowed(cwd):
@@ -159,64 +200,102 @@ def cursor_secondary(prompt):
     return result_from_process(run(cmd, cwd=project, text=prompt), "reply")
 
 
-class ClaudePeer:
-    name = "Claude"
+def review_dict(result):
+    """A usable ReviewResult as a plain dict, or None when the peer failed."""
+    if result is None or result.verdict not in ("approve", "changes_requested"):
+        return None
+    return {"verdict": result.verdict, "summary": result.summary, "findings": list(result.findings)}
+
+
+def ask_claude(instructions, content, scratch, model):
+    # Use the configured Claude profile. Prevent the reviewer from launching hooks or MCPs.
+    def isolated_runner(command, **kwargs):
+        claude_env(kwargs["env"])
+        command[command.index("--tools") + 1] = ""
+        return subprocess.run(command, **kwargs)
+
+    agent = ClaudeDelegator(executable=str(CLAUDE), timeout=65, runner=isolated_runner)
+    return review_dict(agent.review(instructions, content, scratch, model=model, effort="low"))
+
+
+def codex_path():
+    found = shutil.which(CODEX)
+    if found:
+        return found
+    return next((str(place) for place in CODEX_PLACES if place.is_file()), None)
+
+
+def ask_codex(instructions, content, scratch, model):
+    executable = codex_path()
+    if not executable:
+        return None
+
+    def scratch_runner(command, **kwargs):
+        # The scratch folder is not a git repository, which Codex refuses without this flag.
+        command.insert(command.index("exec") + 1, "--skip-git-repo-check")
+        return subprocess.run(command, **kwargs)
+
+    agent = CodexDelegator(executable=executable, timeout=150, runner=scratch_runner)
+    return review_dict(agent.review(instructions, content, scratch, model=model, effort="low"))
+
+
+def ask_grok(prompt, scratch, model):
+    reply = run(
+        [GROK, "--cwd", scratch, "--sandbox", "read-only", "--no-subagents",
+         "--disable-web-search", "--permission-mode", "dontAsk", "--deny", "*",
+         "--model", model or "grok-4.7", "--output-format", "json", "--prompt-file", "/dev/stdin"],
+        cwd=scratch, text=prompt,
+    )
+    return result_from_process(reply, "text")
+
+
+def ask_cursor(prompt, scratch, model):
+    env = dict(os.environ, CURSOR_CONFIG_DIR=scratch, CURSOR_DATA_DIR=scratch)
+    env.pop("CURSOR_API_KEY", None)
+    result = run(
+        [CURSOR, "--workspace", scratch, "--mode", "ask", "--sandbox", "enabled",
+         "--trust", "--model", model or "composer-2.5", "--print", "--output-format", "json", prompt],
+        cwd=scratch, env=env,
+    )
+    primary = result_from_process(result, "result")
+    if primary is not None or (result is not None and result.returncode == 0):
+        return primary
+    emit("Cursor primary unavailable; checking the alternate account")
+    return cursor_secondary(prompt)
+
+
+def ask_peer(peer, instructions, content, use, author):
+    """One peer's answer as {verdict, summary, findings}, or None if it is unavailable."""
+    model = model_for(peer, use, author)
+    with tempfile.TemporaryDirectory(prefix="agent-peer-") as scratch:
+        if peer == "claude":
+            return ask_claude(instructions, content, scratch, model)
+        if peer == "codex":
+            return ask_codex(instructions, content, scratch, model)
+        prompt = instructions + content
+        if peer == "grok":
+            return ask_grok(prompt, scratch, model)
+        if peer == "cursor":
+            return ask_cursor(prompt, scratch, model)
+    return None
+
+
+class PeerChain:
+    """Ask the author's peers in order and return the first usable review."""
+
+    def __init__(self, author, use="review"):
+        self.author, self.use, self.name = author, use, "Peer"
 
     def review(self, _task, diff, _cwd):
-        # Use the signed-in Claude profile. Prevent the reviewer from launching hooks or MCPs.
-        def isolated_runner(command, **kwargs):
-            claude_env(kwargs["env"])
-            command[command.index("--tools") + 1] = ""
-            return subprocess.run(command, **kwargs)
-
-        with tempfile.TemporaryDirectory(prefix="claude-peer-") as scratch:
-            agent = ClaudeDelegator(executable=str(CLAUDE), timeout=65, runner=isolated_runner)
-            result = agent.review("Review this patch using the supplied diff only.", diff, scratch, effort="low")
-        return result
-
-
-class GrokCursorPeers:
-    name = "Grok and Cursor"
-
-    def review(self, _task, diff, _cwd):
-        prompt = REVIEW_INSTRUCTIONS + diff
-        with tempfile.TemporaryDirectory(prefix="agent-peer-") as scratch:
-            grok = run(
-                [GROK, "--cwd", scratch, "--sandbox", "read-only", "--no-subagents",
-                 "--disable-web-search", "--permission-mode", "dontAsk", "--deny", "*",
-                 "--model", "grok-4.7", "--output-format", "json", "--prompt-file", "/dev/stdin"],
-                cwd=scratch, text=prompt,
-            )
-            grok_review = result_from_process(grok, "text")
-            emit("Grok reviewed" if grok_review is not None else "Grok unavailable; skipped")
-            updates = self.cursor(prompt, scratch)
-        findings = []
-        for name, review in (("Grok", grok_review), ("Cursor", updates)):
-            if review:
-                findings.extend(name + ": " + item[:1600] for item in review["findings"])
-        verdict = "changes_requested" if findings else "approve" if grok_review or updates else "error"
-        return ReviewResult(verdict, "Peer review finished.", findings[:12], self.name)
-
-    @staticmethod
-    def cursor(prompt, scratch):
-        env = dict(os.environ, CURSOR_CONFIG_DIR=scratch, CURSOR_DATA_DIR=scratch)
-        env.pop("CURSOR_API_KEY", None)
-        result = run(
-            [CURSOR, "--workspace", scratch, "--mode", "ask", "--sandbox", "enabled",
-             "--trust", "--model", "composer-2.5", "--print", "--output-format", "json", prompt],
-            cwd=scratch, env=env,
-        )
-        primary = result_from_process(result, "result")
-        if primary is not None:
-            emit("Cursor primary reviewed")
-            return primary
-        if result is not None and result.returncode == 0:
-            emit("Cursor primary returned no usable review; skipped")
-            return None
-        emit("Cursor primary unavailable; checking the alternate account")
-        secondary = cursor_secondary(prompt)
-        emit("Cursor alternate reviewed" if secondary is not None else "Cursor alternate unavailable; skipped")
-        return secondary
+        for peer in chain(self.author, self.use):
+            answer = ask_peer(peer, REVIEW_INSTRUCTIONS, diff, self.use, self.author)
+            if answer is not None:
+                self.name = PEER_NAMES[peer]
+                emit(f"{self.name} reviewed")
+                return ReviewResult(answer["verdict"], answer["summary"],
+                                    [item[:1600] for item in answer["findings"]][:12], self.name)
+            emit(f"{PEER_NAMES[peer]} unavailable; trying the next peer")
+        return ReviewResult("error", "No peer was available.", [], self.name)
 
 
 def main(host):
@@ -250,11 +329,7 @@ def main(host):
         return
     event["session_id"] = f"{host}-peer:{event['session_id']}"
     event.pop("last_assistant_message", None)
-    if host == "claude":
-        payload = review_hook.decide(event, "Claude", GrokCursorPeers(), diff=safe_diff)
-    else:
-        author = "Grok" if host == "grok" else "Cursor"
-        payload = review_hook.decide(event, author, ClaudePeer(), diff=safe_diff)
+    payload = review_hook.decide(event, PEER_NAMES[host], PeerChain(host), diff=safe_diff)
     if payload:
         if host == "cursor":
             payload = {"followup_message": payload["reason"]}
@@ -263,7 +338,7 @@ def main(host):
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) == 2 and sys.argv[1] in ("claude", "grok", "cursor"):
+        if len(sys.argv) == 2 and sys.argv[1] in PEER_NAMES:
             main(sys.argv[1])
     except Exception:
         emit("Review unavailable; skipped")

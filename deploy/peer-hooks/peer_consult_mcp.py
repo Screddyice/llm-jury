@@ -51,7 +51,7 @@ def ask_cursor(question, context, scratch):
         'and findings (array of strings). An approval has no findings.'
     )
     prompt = f"{PROMPT} {output_format}\n\nQuestion: {question}\n\nSupplied context:\n{context}"
-    return peer.GrokCursorPeers.cursor(prompt, scratch)
+    return peer.ask_cursor(prompt, scratch, peer.model_for("cursor", "consult", "claude"))
 
 
 def validate(arguments):
