@@ -401,6 +401,29 @@ use → peer list) and `models` (peer → use → model, or a per-author dict wi
 - Cursor's command-line agent (`cursor-agent -p`) runs `postToolUse` hooks but not
   `stop` hooks, so the end-of-turn Claude review needs Cursor's editor agent.
 
+### Codex cloud tasks asking Cursor
+
+`deploy/codex-cloud/` lets a Codex cloud task ask Cursor for a read-only second
+opinion, the same way the Mac hooks do. In the Codex environment settings
+(chatgpt.com/codex, Settings → Environments):
+
+1. **Setup script:**
+   `curl -fsSL https://raw.githubusercontent.com/Screddyice/llm-jury/main/deploy/codex-cloud/setup.sh | bash`.
+   It installs the Cursor CLI and `cursor-consult` into `~/.local/bin`, and adds a short
+   note to `~/.codex/AGENTS.md` telling Codex when to use it.
+2. **Environment variable** `CURSOR_API_KEY` with a Cursor API key. Make it an
+   environment variable, not a secret: Codex removes secrets before the task starts.
+3. **Agent internet access** on, with these domains allowed: `api2.cursor.sh`,
+   `api3.cursor.sh`, `api.cursor.com`, `cursor.com`, `downloads.cursor.com`. Leave all
+   HTTP methods allowed, because the Cursor CLI sends POST requests.
+
+Inside a task, Codex runs `cursor-consult "question" file ...` (or `-` to read context
+from stdin). It uses `composer-2.5` in Cursor's read-only ask mode with a 180-second
+limit; `CURSOR_CONSULT_MODEL` and `CURSOR_CONSULT_TIMEOUT` override those. It exits with
+a clear message when the key or the CLI is missing, and Codex is told to carry on and
+report that. The key and any code Codex sends go to Cursor, so set this up only in
+environments for repositories whose code may go to Cursor.
+
 Use `--scope project` to install the Claude skill in only the current repository, or
 `--force` to replace a locally modified installed copy. Both installers are idempotent.
 
