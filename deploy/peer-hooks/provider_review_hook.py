@@ -18,6 +18,8 @@ CLAUDE = ROOT / ".local/bin/claude"
 CURSOR = ROOT / ".local/bin/cursor-agent"
 GROK = ROOT / ".grok/bin/grok"
 CODEX = "codex"
+# Hooks started by an editor can run with a short PATH, so look where installers put Codex too.
+CODEX_PLACES = (ROOT / ".local/bin/codex", Path("/opt/homebrew/bin/codex"), Path("/usr/local/bin/codex"))
 T3 = ROOT / ".t3/bin/t3"
 REPO_OWNER = re.compile(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([^/]+)/[^/]+$")
 CREDENTIAL_PATH = re.compile(
@@ -216,8 +218,16 @@ def ask_claude(instructions, content, scratch, model):
     return review_dict(agent.review(instructions, content, scratch, model=model, effort="low"))
 
 
+def codex_path():
+    found = shutil.which(CODEX)
+    if found:
+        return found
+    return next((str(place) for place in CODEX_PLACES if place.is_file()), None)
+
+
 def ask_codex(instructions, content, scratch, model):
-    if not shutil.which(CODEX):
+    executable = codex_path()
+    if not executable:
         return None
 
     def scratch_runner(command, **kwargs):
@@ -225,7 +235,7 @@ def ask_codex(instructions, content, scratch, model):
         command.insert(command.index("exec") + 1, "--skip-git-repo-check")
         return subprocess.run(command, **kwargs)
 
-    agent = CodexDelegator(executable=CODEX, timeout=150, runner=scratch_runner)
+    agent = CodexDelegator(executable=executable, timeout=150, runner=scratch_runner)
     return review_dict(agent.review(instructions, content, scratch, model=model, effort="low"))
 
 
