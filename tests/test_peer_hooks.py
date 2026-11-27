@@ -243,3 +243,13 @@ def test_codex_stop_hook_blocks_with_the_review(repo, monkeypatch, capsys):
     peer.main("codex")
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block" and "Claude" in out["reason"]
+
+
+def test_codex_is_found_outside_a_short_path(tmp_path, monkeypatch):
+    codex = tmp_path / "codex"
+    codex.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", codex))
+    assert peer.codex_path() == str(codex)
+    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing",))
+    assert peer.codex_path() is None

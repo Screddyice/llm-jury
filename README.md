@@ -355,7 +355,9 @@ Cursor, both through the same chains.
 
 Each author's end-of-turn review goes to the first available peer in its chain. A peer
 counts as unavailable when its CLI is missing, it is signed out, it times out, or its
-reply is unusable; the next one is asked instead, and the review names who answered.
+reply is unusable; the next one is asked instead, and the review names who answered. Editors can start
+hooks with a short `PATH`, so the hook also looks for `codex` in `~/.local/bin`,
+`/opt/homebrew/bin` and `/usr/local/bin` before calling Codex missing.
 
 | Author | Review chain | Question chain |
 |---|---|---|
