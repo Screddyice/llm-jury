@@ -336,12 +336,22 @@ Machine-specific settings stay out of the repository, in `~/.config/llmjury/peer
 
 | What | Claude Code side | Cursor side |
 |---|---|---|
-| Ask the other mid-task | MCP server `peer_consult_mcp.py cursor` exposes `consult_cursor` | MCP server `peer_consult_mcp.py claude` exposes `consult_claude` |
+| Ask a peer mid-task | MCP server `peer_consult_mcp.py serve claude` exposes `consult_peer` | MCP server `peer_consult_mcp.py serve cursor` exposes `consult_peer` |
 | Review the first edit of a session | PostToolUse hook `peer_consult_mcp.py after-edit-claude` (matcher `Edit\|Write\|MultiEdit`) | `postToolUse` hook `peer_consult_mcp.py after-edit-cursor` |
 | Review the turn's changes at the end | Stop hook `provider_review_hook.py claude` | `stop` hook `provider_review_hook.py cursor` |
 
-Codex uses the same end-of-turn hook: register `provider_review_hook.py codex` as a
-Stop hook in `~/.codex/hooks.json`.
+Codex uses the same three pieces: `peer_consult_mcp.py serve codex` as an MCP server in
+`~/.codex/config.toml`, and `peer_consult_mcp.py after-edit-codex` (PostToolUse) plus
+`provider_review_hook.py codex` (Stop) in `~/.codex/hooks.json`. Codex edits through shell
+commands and patches, so its first-edit review finds the change with `git status`.
+Codex runs a hook only after you trust it in Codex's `/hooks` screen, and again after it
+changes.
+
+`consult_peer` answers with the first available peer in the author's question chain,
+retrying each peer once, and its JSON says which peer answered. The older server
+arguments still work for existing registrations: `peer_consult_mcp.py cursor` serves
+`consult_cursor` for Claude and `peer_consult_mcp.py claude` serves `consult_claude` for
+Cursor, both through the same chains.
 
 Each author's end-of-turn review goes to the first available peer in its chain. A peer
 counts as unavailable when its CLI is missing, it is signed out, it times out, or its

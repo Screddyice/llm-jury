@@ -89,54 +89,60 @@ def test_edited_context_skips_credential_files(repo):
     assert consult.edited_context(str(repo), "secrets.yml") == ""
 
 
-def test_first_edit_review_runs_outside_llm_jury_once_per_session(repo, monkeypatch):
-    calls = []
-
-    def fake_tool_call(reviewer, arguments):
-        calls.append(arguments["repo_path"])
-        return {"content": [{"type": "text", "text": json.dumps({"verdict": "approve"})}]}
-
-    monkeypatch.setattr(consult, "tool_call", fake_tool_call)
+def test_first_edit_review_runs_once_per_session_through_the_chain(repo, monkeypatch):
+    calls = fake_peers(monkeypatch, {"codex": APPROVE})
     (repo / "main.go").write_text("package main\n\nfunc avg(xs []int) int { return 2 }\n")
     event = {"session_id": "s1", "tool_input": {"file_path": str(repo / "main.go")}}
 
     first = consult.review_first_edit("claude", event, str(repo))
     second = consult.review_first_edit("claude", event, str(repo))
 
-    assert "In-session peer review from Cursor" in first
+    assert "In-session peer review from Codex" in first
     assert second == ""
-    assert calls == [str(repo)]
+    assert [c[0] for c in calls] == ["codex"]
 
 
-def test_consult_retries_once_when_the_peer_reply_is_unusable(repo):
-    replies = [None, {"verdict": "approve", "summary": "ok", "findings": []}]
+def test_codex_first_edit_finds_the_change_through_git(repo, monkeypatch):
+    calls = fake_peers(monkeypatch, {"claude": REJECT})
+    (repo / "main.go").write_text("package main\n\nfunc avg(xs []int) int { return 3 }\n")
+    event = {"session_id": "cx1", "tool_name": "Bash", "tool_input": {"command": "python3 edit.py"}}
 
-    def flaky(question, context, scratch):
-        return replies.pop(0)
+    review = consult.review_first_edit("codex", event, str(repo))
 
-    result = consult.tool_call(flaky, {"repo_path": str(repo), "question": "Sort first?"})
+    assert "In-session peer review from Claude" in review and "wrong sign" in review
+    assert calls[0][0] == "claude"
+
+
+def test_consult_retries_a_peer_once_then_falls_through(repo, monkeypatch):
+    answers = {"codex": [None, None], "grok": [None, APPROVE]}
+    seen = []
+
+    def ask(name, instructions, content, use, author):
+        seen.append(name)
+        queue = answers.get(name, [])
+        return queue.pop(0) if queue else None
+
+    monkeypatch.setattr(peer, "ask_peer", ask)
+    result = consult.tool_call("claude", {"repo_path": str(repo), "question": "Sort first?"})
 
     assert result["isError"] is False
-    assert json.loads(result["content"][0]["text"])["summary"] == "ok"
-    assert replies == []
+    assert json.loads(result["content"][0]["text"])["peer"] == "Grok"
+    assert seen == ["codex", "codex", "grok", "grok"]
 
 
-def test_consult_reports_the_peer_unavailable_after_two_unusable_replies(repo):
-    calls = []
-
-    def dead(question, context, scratch):
-        calls.append(question)
-
-    result = consult.tool_call(dead, {"repo_path": str(repo), "question": "Sort first?"})
-
+def test_consult_reports_every_peer_unavailable(repo, monkeypatch):
+    fake_peers(monkeypatch, {})
+    result = consult.tool_call("cursor", {"repo_path": str(repo), "question": "Sort first?"})
     assert result["isError"] is True
-    assert len(calls) == 2
 
 
-def test_mcp_lists_the_consult_tool_for_each_peer():
-    for target in ("claude", "cursor"):
-        listed = consult.reply({"id": 1, "method": "tools/list"}, target)
-        assert [t["name"] for t in listed["result"]["tools"]] == ["consult_" + target]
+def test_mcp_serves_consult_peer_and_keeps_the_old_names():
+    for action, author, tool in [("serve", "codex", "consult_peer"), ("cursor", "claude", "consult_cursor"),
+                                 ("claude", "cursor", "consult_claude")]:
+        resolved_author, name = consult.server_identity(action, author if action == "serve" else None)
+        listed = consult.reply({"id": 1, "method": "tools/list"}, resolved_author, name)
+        assert resolved_author == author
+        assert [t["name"] for t in listed["result"]["tools"]] == [tool]
 
 
 def test_cursor_secondary_accepts_a_tilde_project_path(repo, tmp_path, monkeypatch):
