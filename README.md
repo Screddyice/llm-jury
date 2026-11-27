@@ -411,7 +411,8 @@ opinion, the same way the Mac hooks do. In the Codex environment settings
    `curl -fsSL https://raw.githubusercontent.com/Screddyice/llm-jury/main/deploy/codex-cloud/setup.sh | bash`.
    It installs the Cursor CLI and `cursor-consult` into `~/.local/bin`, links the helper
    into `/usr/local/bin` (task shells do not read `~/.bashrc`) unless another
-   `cursor-consult` is already there, and adds a short
+   `cursor-consult` is already there (a link made by a second setup run at the same
+   moment counts as its own), and adds a short
    note to `~/.codex/AGENTS.md` telling Codex when to use it.
 2. **Environment variable** `CURSOR_API_KEY` with a Cursor API key. Make it an
    environment variable, not a secret: Codex removes secrets before the task starts.

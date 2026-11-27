@@ -116,3 +116,17 @@ def test_setup_leaves_another_cursor_consult_alone(fake):
         assert result.returncode == 0, result.stderr
     assert not other.is_symlink() and "someone else" in other.read_text()
     assert "not ours" in result.stderr
+
+
+def test_setup_accepts_a_link_made_by_a_concurrent_run(fake):
+    tmp, env = fake
+    shared = tmp / "shared-bin"
+    shared.mkdir()
+    # An `ln` that loses the race: the other run's link appears, then ours fails.
+    racing_ln = tmp / "bin" / "ln"
+    racing_ln.write_text('#!/bin/sh\n/bin/ln "$@"\necho "ln: File exists" >&2\nexit 1\n')
+    racing_ln.chmod(0o755)
+    result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert (shared / "cursor-consult").is_symlink()
