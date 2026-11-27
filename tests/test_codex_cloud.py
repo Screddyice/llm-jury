@@ -195,3 +195,27 @@ def test_setup_avoids_a_fallback_folder_others_can_write(fake):
         assert run.returncode == 0, run.stderr
     finally:
         home.chmod(0o755)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write to a 0555 folder")
+def test_consult_through_a_link_still_finds_its_home(fake):
+    tmp, env = fake
+    home = Path(env["HOME"])
+    home.mkdir()
+    home.chmod(0o555)
+    (tmp / "bin" / "cursor-agent").write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$HOME" > "$ARGS_FILE.home"\necho ok\n')
+    try:
+        result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+        private = Path(env["LLMJURY_FALLBACK_HOME"])
+        link = tmp / "elsewhere" / "cursor-consult"
+        link.parent.mkdir()
+        link.symlink_to(private / ".local" / "bin" / "cursor-consult")
+        run = subprocess.run([str(link), "question"], env=env,
+                             capture_output=True, text=True, timeout=30)
+        assert run.returncode == 0, run.stderr
+        assert (tmp / "args.home").read_text().strip() == str(private)
+    finally:
+        home.chmod(0o755)

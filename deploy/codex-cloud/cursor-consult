@@ -15,7 +15,12 @@ fi
 # With a read-only home, setup installed this helper and Cursor under a private fallback
 # home (<home>/.local/bin/cursor-consult). Use that folder, found from where this file is.
 if ! { [ -d "$HOME" ] && [ -w "$HOME" ]; }; then
-  own_home="$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd || true)"
+  self="$0"
+  while [ -L "$self" ]; do  # follow links (for example /usr/local/bin) to the installed file
+    target="$(readlink "$self")"
+    case "$target" in /*) self="$target" ;; *) self="$(dirname "$self")/$target" ;; esac
+  done
+  own_home="$(cd "$(dirname "$self")/../.." 2>/dev/null && pwd || true)"
   if [ -n "$own_home" ] && [ -O "$own_home" ] && [ -w "$own_home" ]; then
     HOME="$own_home"
     export HOME
