@@ -69,3 +69,36 @@ def test_setup_installs_the_helper_and_instructions_once(fake):
     instructions = (home / ".codex" / "AGENTS.md").read_text()
     assert instructions.count("cursor-consult") >= 1
     assert instructions.count("<!-- llmjury:cursor-consult -->") == 1
+
+
+def test_consult_reads_a_file_named_like_an_option(fake):
+    tmp, env = fake
+    (tmp / "--help").write_text("print('real file')\n")
+    result = subprocess.run([str(CLOUD / "cursor-consult"), "Check this", "--help"], env=env,
+                            cwd=tmp, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert "real file" in (tmp / "args").read_text()
+
+
+def test_consult_caps_the_combined_context(fake):
+    tmp, env = fake
+    files = []
+    for n in range(9):
+        path = tmp / f"big{n}.txt"
+        path.write_text("x" * 20000)
+        files.append(str(path))
+    env["CURSOR_CONSULT_CONTEXT_LIMIT"] = "16000"
+    result = consult(env, "Review these", *files)
+    assert result.returncode == 0, result.stderr
+    assert len((tmp / "args").read_text()) < 20000
+
+
+def test_setup_puts_the_helper_on_the_default_path(fake):
+    tmp, env = fake
+    shared = tmp / "usr-local-bin"
+    shared.mkdir()
+    env["LLMJURY_SHARED_BIN"] = str(shared)
+    result = subprocess.run(["bash", str(CLOUD / "setup.sh")], env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert os.access(shared / "cursor-consult", os.X_OK)

@@ -21,6 +21,12 @@ else
   chmod 755 "$bin/cursor-consult"
 fi
 
+# Non-interactive task shells skip ~/.bashrc, so also link the helper onto the default PATH.
+shared="${LLMJURY_SHARED_BIN:-/usr/local/bin}"
+if [ -d "$shared" ] && [ -w "$shared" ]; then
+  ln -sf "$bin/cursor-consult" "$shared/cursor-consult"
+fi
+
 if ! grep -qs 'HOME/.local/bin' "$HOME/.bashrc"; then
   # shellcheck disable=SC2016  # write a literal $HOME for later shells
   echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
@@ -35,7 +41,7 @@ $marker
 Before a material implementation decision, when stuck on a non-obvious failure, and
 before you finish a non-trivial change, ask Cursor for a read-only second opinion:
 
-    cursor-consult "one precise question" path/to/changed_file [more files]
+    ~/.local/bin/cursor-consult "one precise question" path/to/changed_file [more files]
 
 Weigh its answer against the code and tests; it is advisory. If cursor-consult fails
 or is unavailable, say so in your summary and continue with your own checks. Never
