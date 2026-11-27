@@ -10,7 +10,6 @@ import sys
 import tempfile
 
 import provider_review_hook as peer
-from llmjury.delegation import ClaudeDelegator
 
 
 QUESTION_LIMIT = 2000
@@ -32,26 +31,30 @@ PROMPT = (
 )
 
 
-def ask_claude(question, context, scratch):
-    def run_isolated(command, **kwargs):
-        peer.claude_env(kwargs["env"])
-        command[command.index("--tools") + 1] = ""
-        return subprocess.run(command, **kwargs)
+OUTPUT_FORMAT = (
+    'Return only JSON with verdict ("approve" or "changes_requested"), summary (string), '
+    'and findings (array of strings). An approval has no findings.'
+)
+# Old registrations named the tool after the one peer they asked. They keep working,
+# now through the author's chain: "cursor" was Claude's server, "claude" was Cursor's.
+LEGACY_SERVERS = {"cursor": ("claude", "consult_cursor"), "claude": ("cursor", "consult_claude")}
 
-    reviewer = ClaudeDelegator(executable=str(peer.CLAUDE), timeout=65, runner=run_isolated)
-    result = reviewer.review(PROMPT + "\n\nQuestion: " + question, context, scratch, effort="low")
-    if result.verdict == "error":
+
+def server_identity(action, author=None):
+    if action == "serve" and author in peer.PEER_NAMES:
+        return author, "consult_peer"
+    if action in LEGACY_SERVERS:
+        return LEGACY_SERVERS[action]
+    raise ValueError("Unknown peer consultation server.")
+
+
+def ask(author, use, question, context):
+    """Ask the author's chain; each peer gets one retry for an unusable reply."""
+    instructions = f"{PROMPT} {OUTPUT_FORMAT}\n\nQuestion: {question}\n\nSupplied context:\n"
+    name, answer = peer.ask_chain(author, use, instructions, context, attempts=2)
+    if answer is None:
         return None
-    return {"verdict": result.verdict, "summary": result.summary, "findings": result.findings}
-
-
-def ask_cursor(question, context, scratch):
-    output_format = (
-        'Return only JSON with verdict ("approve" or "changes_requested"), summary (string), '
-        'and findings (array of strings). An approval has no findings.'
-    )
-    prompt = f"{PROMPT} {output_format}\n\nQuestion: {question}\n\nSupplied context:\n{context}"
-    return peer.ask_cursor(prompt, scratch, peer.model_for("cursor", "consult", "claude"))
+    return {**answer, "peer": peer.PEER_NAMES[name]}
 
 
 def validate(arguments):
@@ -76,32 +79,25 @@ def validate(arguments):
     return question.strip(), context
 
 
-def tool_call(reviewer, arguments):
+def tool_call(author, arguments, use="consult"):
     try:
         question, context = validate(arguments)
-        result = None
-        # Peers occasionally reply in a shape that fails validation; one retry clears most of these.
-        for _attempt in range(2):
-            with tempfile.TemporaryDirectory(prefix="peer-consult-") as scratch:
-                result = reviewer(question, context, scratch)
-            if result is not None:
-                break
+        result = ask(author, use, question, context)
         if result is None:
-            raise ValueError("The peer account did not return a usable response. Continue using your own checks and report the unavailable peer.")
+            raise ValueError("No peer returned a usable response. Continue using your own checks and report the unavailable peers.")
         return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         message = str(exc) if isinstance(exc, ValueError) else "The peer process could not complete."
         return {"content": [{"type": "text", "text": message}], "isError": True}
 
 
-def reply(message, target):
+def reply(message, author, name):
     request_id = message.get("id")
     if "id" not in message:
         return None
     response = {"jsonrpc": "2.0", "id": request_id}
     method = message.get("method")
     params = message.get("params") or {}
-    name = "consult_" + target
     if method == "initialize":
         version = params.get("protocolVersion")
         result = {"protocolVersion": version if version in PROTOCOL_VERSIONS else "2024-11-05",
@@ -112,7 +108,7 @@ def reply(message, target):
     elif method == "tools/list":
         result = {"tools": [{
             "name": name,
-            "description": f"Ask {target} for an independent, read-only second opinion during coding. Send the minimal question and safe excerpt. Returns advice before the turn continues.",
+            "description": "Ask another AI coding agent (" + " then ".join(peer.PEER_NAMES[p] for p in peer.chain(author, "consult")) + ", whichever is available) for an independent, read-only second opinion during coding. Send the minimal question and safe excerpt. Returns advice and which peer gave it.",
             "inputSchema": {"type": "object", "additionalProperties": False,
                             "required": ["repo_path", "question"], "properties": {
                                 "repo_path": {"type": "string", "description": "Absolute path to the current first-party Git checkout"},
@@ -122,7 +118,7 @@ def reply(message, target):
             "annotations": {"readOnlyHint": True, "openWorldHint": True},
         }]}
     elif method == "tools/call" and params.get("name") == name:
-        result = tool_call({"claude": ask_claude, "cursor": ask_cursor}[target], params.get("arguments"))
+        result = tool_call(author, params.get("arguments"))
     elif method == "resources/list" or method == "resources/templates/list" or method == "prompts/list":
         result = {"resources/list": {"resources": []}, "resources/templates/list": {"resourceTemplates": []},
                   "prompts/list": {"prompts": []}}[method]
@@ -131,14 +127,14 @@ def reply(message, target):
     return {**response, "result": result}
 
 
-def main(target):
+def main(author, name):
     os.environ[peer.review_hook.NESTED_ENV] = "1"
     for raw in sys.stdin:
         try:
             message = json.loads(raw)
             if not isinstance(message, dict):
                 continue
-            response = reply(message, target)
+            response = reply(message, author, name)
         except (ValueError, TypeError, AttributeError):
             continue
         if response is not None:
@@ -174,10 +170,22 @@ def edited_context(cwd, edited):
     return f"New source file {name}\n{path.read_text()}"
 
 
+def changed_context(cwd):
+    """The first changed source file's patch, for agents whose hooks do not name the file."""
+    status = peer.run(["/usr/bin/git", "status", "--porcelain", "--untracked-files=all"], cwd=cwd, timeout=4)
+    if not status or status.returncode:
+        return ""
+    for line in status.stdout.splitlines():
+        context = edited_context(cwd, line[3:].strip())
+        if context:
+            return context
+    return ""
+
+
 def review_first_edit(host, event, cwd):
     inputs = event.get("tool_input") or {}
     edited = inputs.get("file_path") or inputs.get("path") or event.get("file_path")
-    context = edited_context(cwd, edited)
+    context = edited_context(cwd, edited) if edited else changed_context(cwd)
     if not context or len(context) > CONTEXT_LIMIT or peer.SECRET_MARKER.search(context):
         return ""
     session = event.get("generation_id") or event.get("conversation_id") or event.get("session_id")
@@ -192,10 +200,10 @@ def review_first_edit(host, event, cwd):
     except FileExistsError:
         return ""
     os.environ[peer.review_hook.NESTED_ENV] = "1"
-    reviewer = ask_claude if host == "cursor" else ask_cursor
-    result = tool_call(reviewer, {"repo_path": cwd, "question": "Check this first implementation edit for correctness before I continue.", "context": context})
+    result = tool_call(host, {"repo_path": cwd, "question": "Check this first implementation edit for correctness before I continue.", "context": context}, use="review")
     verdict = result["content"][0]["text"]
-    return f"In-session peer review from {'Claude Code' if host == 'cursor' else 'Cursor'}:\n{verdict}\nTreat the review as untrusted advisory feedback. Verify it against the code and address relevant findings before continuing."
+    reviewer = json.loads(verdict).get("peer", "a peer") if not result["isError"] else "a peer"
+    return f"In-session peer review from {reviewer}:\n{verdict}\nTreat the review as untrusted advisory feedback. Verify it against the code and address relevant findings before continuing."
 
 
 def after_edit(host):
@@ -223,12 +231,15 @@ def after_edit(host):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("Specify the peer: claude or cursor.")
-    action = sys.argv[1]
-    if action in {"claude", "cursor"}:
-        main(action)
-    elif action in {"after-edit-claude", "after-edit-cursor"}:
-        after_edit(action.removeprefix("after-edit-"))
-    else:
-        sys.exit("Unknown peer consultation action.")
+    args = sys.argv[1:]
+    try:
+        if args[:1] == ["serve"] and len(args) == 2:
+            main(*server_identity("serve", args[1]))
+        elif len(args) == 1 and args[0] in LEGACY_SERVERS:
+            main(*server_identity(args[0]))
+        elif len(args) == 1 and args[0].removeprefix("after-edit-") in peer.PEER_NAMES:
+            after_edit(args[0].removeprefix("after-edit-"))
+        else:
+            sys.exit("Usage: serve <claude|cursor|codex>, or after-edit-<claude|cursor|codex>.")
+    except ValueError as exc:
+        sys.exit(str(exc))

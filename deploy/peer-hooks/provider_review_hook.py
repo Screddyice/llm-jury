@@ -280,6 +280,18 @@ def ask_peer(peer, instructions, content, use, author):
     return None
 
 
+def ask_chain(author, use, instructions, content, attempts=1):
+    """(peer, answer) from the first peer in the author's chain that answers usably."""
+    for peer in chain(author, use):
+        for _attempt in range(attempts):
+            answer = ask_peer(peer, instructions, content, use, author)
+            if answer is not None:
+                emit(f"{PEER_NAMES[peer]} answered")
+                return peer, answer
+        emit(f"{PEER_NAMES[peer]} unavailable; trying the next peer")
+    return None, None
+
+
 class PeerChain:
     """Ask the author's peers in order and return the first usable review."""
 
@@ -287,15 +299,12 @@ class PeerChain:
         self.author, self.use, self.name = author, use, "Peer"
 
     def review(self, _task, diff, _cwd):
-        for peer in chain(self.author, self.use):
-            answer = ask_peer(peer, REVIEW_INSTRUCTIONS, diff, self.use, self.author)
-            if answer is not None:
-                self.name = PEER_NAMES[peer]
-                emit(f"{self.name} reviewed")
-                return ReviewResult(answer["verdict"], answer["summary"],
-                                    [item[:1600] for item in answer["findings"]][:12], self.name)
-            emit(f"{PEER_NAMES[peer]} unavailable; trying the next peer")
-        return ReviewResult("error", "No peer was available.", [], self.name)
+        peer, answer = ask_chain(self.author, self.use, REVIEW_INSTRUCTIONS, diff)
+        if answer is None:
+            return ReviewResult("error", "No peer was available.", [], self.name)
+        self.name = PEER_NAMES[peer]
+        return ReviewResult(answer["verdict"], answer["summary"],
+                            [item[:1600] for item in answer["findings"]][:12], self.name)
 
 
 def main(host):
