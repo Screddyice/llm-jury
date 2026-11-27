@@ -246,10 +246,13 @@ def test_codex_stop_hook_blocks_with_the_review(repo, monkeypatch, capsys):
 
 
 def test_codex_is_found_outside_a_short_path(tmp_path, monkeypatch):
+    stale = tmp_path / "stale-codex"
+    stale.write_text("not a program\n")
     codex = tmp_path / "codex"
     codex.write_text("#!/bin/sh\n")
+    codex.chmod(0o755)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", codex))
+    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", stale, codex))
     assert peer.codex_path() == str(codex)
-    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing",))
+    monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", stale))
     assert peer.codex_path() is None
