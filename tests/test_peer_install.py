@@ -82,3 +82,36 @@ def test_dry_run_changes_nothing(tmp_path):
     changed = install.install(home, python="/py", dry_run=True)
     assert changed
     assert {p: p.read_text() for p in home.rglob("*") if p.is_file()} == before
+
+
+def test_rerun_leaves_installed_files_alone_when_only_layout_differs(tmp_path):
+    home = tmp_path / "home"
+    seed(home)
+    install.install(home, python="/py")
+    # Another tool re-added its own hook after ours, a setting holds non-ASCII text,
+    # and a file lost its final newline. None of that changes what the hooks do.
+    hooks_file = home / ".cursor" / "hooks.json"
+    hooks = json.loads(hooks_file.read_text())
+    hooks["hooks"]["stop"].append({"command": "claude-mem hook cursor summarize"})
+    hooks_file.write_text(json.dumps(hooks, indent=2))
+    settings_file = home / ".claude" / "settings.json"
+    settings = json.loads(settings_file.read_text())
+    settings["note"] = "keep this — as typed"
+    settings_file.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+    mcp_file = home / ".cursor" / "mcp.json"
+    mcp_file.write_text(mcp_file.read_text().rstrip("\n"))
+    before = {p: p.read_text() for p in (hooks_file, settings_file, mcp_file)}
+
+    assert install.install(home, python="/py") == []
+    assert {p: p.read_text() for p in before} == before
+
+
+def test_changed_file_keeps_non_ascii_text_readable(tmp_path):
+    home = tmp_path / "home"
+    seed(home)
+    settings_file = home / ".claude" / "settings.json"
+    settings = json.loads(settings_file.read_text())
+    settings["note"] = "keep this — as typed"
+    settings_file.write_text(json.dumps(settings))
+    install.install(home, python="/py")
+    assert "keep this — as typed" in settings_file.read_text()

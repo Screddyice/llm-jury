@@ -251,7 +251,9 @@ def test_codex_is_found_outside_a_short_path(tmp_path, monkeypatch):
     codex = tmp_path / "codex"
     codex.write_text("#!/bin/sh\n")
     codex.chmod(0o755)
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))  # a short PATH with no codex on it, on any machine
     monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", stale, codex))
     assert peer.codex_path() == str(codex)
     monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", stale))

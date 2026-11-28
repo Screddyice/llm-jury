@@ -12,6 +12,7 @@ Codex's /hooks screen.
 """
 
 import argparse
+import copy
 import json
 from pathlib import Path
 import re
@@ -57,9 +58,13 @@ class Writer:
         path.write_text(text)
 
     def json(self, path, update):
+        """Apply update; leave the file untouched when its parsed content would not change."""
         data = json.loads(path.read_text()) if path.exists() else {}
+        before = copy.deepcopy(data)
         update(data)
-        self.write(path, json.dumps(data, indent=2) + "\n")
+        if path.exists() and data == before:
+            return
+        self.write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def is_ours(command):
@@ -73,10 +78,20 @@ def nested(command, timeout, matcher=None):
     return entry
 
 
+def already_installed(items, entry, ours):
+    """True when entry is our only registration, wherever it sits among other tools' hooks."""
+    mine = [item for item in items if ours(item)]
+    return mine == [entry]
+
+
 def set_nested_hook(data, event, entry):
     """Claude/Codex layout: hooks[event] = [{matcher?, hooks: [{command}]}]."""
+    current = data.setdefault("hooks", {}).get(event, [])
+    if already_installed(current, entry, lambda item: any(
+            is_ours(hook.get("command", "")) for hook in item.get("hooks", []))):
+        return
     entries = []
-    for item in data.setdefault("hooks", {}).get(event, []):
+    for item in current:
         kept = [hook for hook in item.get("hooks", []) if not is_ours(hook.get("command", ""))]
         if kept:
             entries.append({**item, "hooks": kept})
@@ -85,8 +100,10 @@ def set_nested_hook(data, event, entry):
 
 def set_flat_hook(data, event, entry):
     """Cursor layout: hooks[event] = [{command, matcher?, timeout?}]."""
-    kept = [hook for hook in data.setdefault("hooks", {}).get(event, [])
-            if not is_ours(hook.get("command", ""))]
+    current = data.setdefault("hooks", {}).get(event, [])
+    if already_installed(current, entry, lambda hook: is_ours(hook.get("command", ""))):
+        return
+    kept = [hook for hook in current if not is_ours(hook.get("command", ""))]
     data["hooks"][event] = kept + [entry]
 
 
