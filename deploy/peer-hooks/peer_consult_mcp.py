@@ -64,14 +64,14 @@ def validate(arguments):
     if context is None:
         context = ""
     if not isinstance(root, str) or not Path(root).is_absolute() or len(root) > 4096:
-        raise ValueError("Provide an absolute path to the active first-party checkout.")
+        raise ValueError("Provide an absolute path to the folder you are working in.")
     if not isinstance(question, str) or not question.strip() or len(question) > QUESTION_LIMIT:
         raise ValueError("Provide a specific question of up to 2000 characters.")
     if not isinstance(context, str) or len(context) > CONTEXT_LIMIT:
         raise ValueError("Context must be a minimal excerpt of up to 16000 characters.")
     checkout = Path(root).resolve()
-    if not checkout.is_dir() or not peer.repo_allowed(checkout):
-        raise ValueError("The checkout must have an allowed first-party GitHub origin.")
+    if not checkout.is_dir() or not peer.location_allowed(str(checkout)):
+        raise ValueError("This folder is a checkout outside the configured owners, so it cannot go to a peer.")
     if peer.SECRET_MARKER.search(question + "\n" + context):
         raise ValueError("Remove credentials from the consultation input.")
     if any(peer.CREDENTIAL_PATH.search(name) for pair in PRIVATE_DIFF.findall(context) for name in pair):
@@ -111,7 +111,7 @@ def reply(message, author, name):
             "description": "Ask another AI coding agent (" + " then ".join(peer.PEER_NAMES[p] for p in peer.chain(author, "consult")) + ", whichever is available) for an independent, read-only second opinion during coding. Send the minimal question and safe excerpt. Returns advice and which peer gave it.",
             "inputSchema": {"type": "object", "additionalProperties": False,
                             "required": ["repo_path", "question"], "properties": {
-                                "repo_path": {"type": "string", "description": "Absolute path to the current first-party Git checkout"},
+                                "repo_path": {"type": "string", "description": "Absolute path to the folder you are working in (any folder except a client or RS21 checkout)"},
                                 "question": {"type": "string", "maxLength": QUESTION_LIMIT},
                                 "context": {"type": "string", "maxLength": CONTEXT_LIMIT},
                             }},

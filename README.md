@@ -340,12 +340,15 @@ Machine-specific settings stay out of the repository, in `~/.config/llmjury/peer
 {
   "owners": ["your-github-user", "your-org"],
   "claudeConfigDir": "~/path/to/claude/profile",
-  "cursorSecondary": {"instance": "t3-instance-id", "project": "~/path/to/project"}
+  "cursorSecondary": {"instance": "t3-instance-id", "project": "~/path/to/project"},
+  "chatReview": {"minAnswerChars": 200}
 }
 ```
 
 - `owners` lists the GitHub owners whose checkouts may be sent to the other agent. With
   no file, or an empty list, the hooks review nothing.
+- `chatReview` is optional. `false` turns off end-of-turn review of chats; `minAnswerChars`
+  sets the shortest answer worth reviewing (200 when unset).
 - `claudeConfigDir` is optional. It picks the Claude profile the reviewer runs under;
   without it the reviewer uses the caller's own profile.
 - `cursorSecondary` is optional: an alternate Cursor login used through T3 when the
@@ -355,7 +358,7 @@ Machine-specific settings stay out of the repository, in `~/.config/llmjury/peer
 |---|---|---|
 | Ask a peer mid-task | MCP server `peer_consult_mcp.py serve claude` exposes `consult_peer` | MCP server `peer_consult_mcp.py serve cursor` exposes `consult_peer` |
 | Review the first edit of a session | PostToolUse hook `peer_consult_mcp.py after-edit-claude` (matcher `Edit\|Write\|MultiEdit`) | `postToolUse` hook `peer_consult_mcp.py after-edit-cursor` |
-| Review the turn's changes at the end | Stop hook `provider_review_hook.py claude` | `stop` hook `provider_review_hook.py cursor` |
+| Review the turn at the end (its code changes, or else its answer) | Stop hook `provider_review_hook.py claude` | `stop` hook `provider_review_hook.py cursor` |
 
 Codex uses the same three pieces: `peer_consult_mcp.py serve codex` as an MCP server in
 `~/.codex/config.toml`, and `peer_consult_mcp.py after-edit-codex` (PostToolUse) plus
@@ -390,8 +393,17 @@ default model. Override either table in the config file below with `chains` (aut
 use → peer list) and `models` (peer → use → model, or a per-author dict with a
 `default` entry), for example `"models": {"cursor": {"review": {"codex": "claude-opus-5-thinking-high", "default": "gpt-5.6-sol-high"}}}`.
 
-- Everything runs only in checkouts whose `origin` owner is in `owners`. List only
-  repositories whose code may go to both providers, and leave client repositories out.
+- End-of-turn reviews and `consult_peer` work in any folder, not only repositories: a
+  scratch chat, a plain folder, a new repo with no remote yet, or a Cursor chat with no
+  workspace. They stay off inside any checkout with a remote outside `owners` (client and
+  RS21 repositories). Every checkout that encloses the folder counts, so a repo nested in a
+  client repo, or a submodule of one, stays off too, as does a checkout git refuses to read.
+- When a turn changed code in a checkout whose remotes are all in `owners`, the peer
+  reviews the diff. Otherwise it reviews the chat: your last request and the agent's final
+  answer, read from the agent's transcript (Claude Code, Codex and Cursor formats). Answers
+  shorter than `minAnswerChars`, and turns containing a secret, are skipped. Problems the
+  peer finds come back to the agent as one follow-up, like code findings.
+- The first-edit review still needs a checkout whose `origin` owner is in `owners`.
 - The first-edit review runs once per session, for common source files (Python, JS/TS,
   Go, Rust, Swift, Kotlin, Java, Ruby, SQL, CSS/HTML, YAML, Terraform and similar). It
   skips files under dot-folders, credential-looking paths, and edits containing secrets.

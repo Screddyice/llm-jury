@@ -258,3 +258,152 @@ def test_codex_is_found_outside_a_short_path(tmp_path, monkeypatch):
     assert peer.codex_path() == str(codex)
     monkeypatch.setattr(peer, "CODEX_PLACES", (tmp_path / "missing", stale))
     assert peer.codex_path() is None
+
+
+LONG_ANSWER = "The average is computed with integer division, so avg([1, 2]) returns 1. " * 5
+
+
+def claude_transcript(path, prompt, answer):
+    lines = [
+        {"type": "user", "isMeta": True, "message": {"role": "user", "content": "<system-reminder>x</system-reminder>"}},
+        {"type": "user", "message": {"role": "user", "content": prompt}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash"}]}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": answer}]}},
+    ]
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+    return path
+
+
+def run_stop(monkeypatch, capsys, host, event):
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps(event)))
+    monkeypatch.delenv("LLMJURY_NESTED", raising=False)
+    peer.main(host)
+    out = capsys.readouterr().out.strip()
+    return json.loads(out) if out else None
+
+
+def test_chat_turn_is_reviewed_outside_any_repo(repo, tmp_path, monkeypatch, capsys):
+    calls = fake_peers(monkeypatch, {"codex": REJECT})
+    folder = tmp_path / "notes"
+    folder.mkdir()
+    transcript = claude_transcript(tmp_path / "t.jsonl", "What does avg return?", LONG_ANSWER)
+    out = run_stop(monkeypatch, capsys, "claude", {
+        "cwd": str(folder), "session_id": "chat-1", "transcript_path": str(transcript)})
+    assert out["decision"] == "block" and "wrong sign" in out["reason"] and "Codex" in out["reason"]
+    assert [c[:2] for c in calls] == [("codex", "review")]
+
+
+def test_chat_review_sends_the_request_and_the_answer(repo, tmp_path, monkeypatch, capsys):
+    sent = []
+    monkeypatch.setattr(peer, "ask_peer", lambda name, instructions, content, use, author: sent.append(content) or APPROVE)
+    transcript = claude_transcript(tmp_path / "t.jsonl", "What does avg return?", "old answer")
+    assert run_stop(monkeypatch, capsys, "claude", {
+        "cwd": str(tmp_path), "session_id": "chat-2", "transcript_path": str(transcript),
+        "last_assistant_message": LONG_ANSWER}) is None
+    assert "What does avg return?" in sent[0] and LONG_ANSWER.strip() in sent[0] and "old answer" not in sent[0]
+
+
+def test_chat_review_skips_client_and_rs21_checkouts(repo, tmp_path, monkeypatch, capsys):
+    calls = fake_peers(monkeypatch, {"codex": REJECT})
+    transcript = claude_transcript(tmp_path / "t.jsonl", "Explain this", LONG_ANSWER)
+    for origin in ("https://github.com/some-client/app.git", "https://github.com/rs21io/app.git",
+                   "https://gitlab.com/example-org/app.git"):
+        git(repo, "remote", "set-url", "origin", origin)
+        assert run_stop(monkeypatch, capsys, "claude", {
+            "cwd": str(repo), "session_id": "c", "transcript_path": str(transcript)}) is None
+    git(repo, "remote", "set-url", "origin", "https://github.com/example-org/some-app.git")
+    git(repo, "remote", "add", "upstream", "https://github.com/some-client/app.git")
+    assert run_stop(monkeypatch, capsys, "claude", {
+        "cwd": str(repo), "session_id": "c", "transcript_path": str(transcript)}) is None
+    assert calls == []
+
+
+def test_location_check_fails_closed_when_git_cannot_answer(repo, monkeypatch):
+    monkeypatch.setattr(peer, "run", lambda *a, **k: None)
+    assert peer.location_allowed(str(repo)) is False
+    assert peer.location_allowed(None) is True
+
+
+def test_short_answers_are_not_reviewed(repo, tmp_path, monkeypatch, capsys):
+    calls = fake_peers(monkeypatch, {"codex": REJECT})
+    transcript = claude_transcript(tmp_path / "t.jsonl", "Thanks", "You're welcome.")
+    assert run_stop(monkeypatch, capsys, "claude", {
+        "cwd": str(tmp_path), "session_id": "s", "transcript_path": str(transcript)}) is None
+    assert calls == []
+
+
+def test_repo_turn_without_code_changes_still_gets_a_chat_review(repo, tmp_path, monkeypatch, capsys):
+    calls = fake_peers(monkeypatch, {"codex": APPROVE})
+    transcript = claude_transcript(tmp_path / "t.jsonl", "How is avg computed?", LONG_ANSWER)
+    assert run_stop(monkeypatch, capsys, "claude", {
+        "cwd": str(repo), "session_id": "r", "transcript_path": str(transcript)}) is None
+    assert [c[0] for c in calls] == ["codex"]
+
+
+def test_cursor_chat_without_a_workspace_is_reviewed(repo, tmp_path, monkeypatch, capsys):
+    calls = fake_peers(monkeypatch, {"claude": REJECT})
+    transcript = tmp_path / "cursor.jsonl"
+    transcript.write_text("\n".join(json.dumps(line) for line in [
+        {"role": "user", "message": {"content": [{"type": "text", "text":
+            "<timestamp>now</timestamp>\n<user_query>\nWhat does avg return?\n</user_query>"}]}},
+        {"role": "assistant", "message": {"content": [{"type": "text", "text": LONG_ANSWER}]}},
+    ]))
+    out = run_stop(monkeypatch, capsys, "cursor", {
+        "status": "completed", "loop_count": 0, "workspace_roots": [],
+        "conversation_id": "cur-1", "transcript_path": str(transcript)})
+    assert "wrong sign" in out["followup_message"] and calls[0][0] == "claude"
+
+
+def test_codex_transcript_turn_is_read(tmp_path):
+    transcript = tmp_path / "rollout.jsonl"
+    def message(role, kind, text):
+        return {"type": "response_item", "payload": {"type": "message", "role": role,
+                "content": [{"type": kind, "text": text}]}}
+    transcript.write_text("\n".join(json.dumps(line) for line in [
+        message("user", "input_text", "<environment_context>cwd</environment_context>"),
+        message("user", "input_text", "Is avg right?"),
+        message("assistant", "output_text", "No, it truncates."),
+    ]))
+    assert peer.last_turn(str(transcript)) == ("Is avg right?", "No, it truncates.")
+
+
+def test_chat_review_can_be_turned_off(repo, tmp_path, monkeypatch, capsys):
+    write_config(tmp_path / "home", {**OWNER_CONFIG, "chatReview": False})
+    calls = fake_peers(monkeypatch, {"codex": REJECT})
+    transcript = claude_transcript(tmp_path / "t.jsonl", "Explain", LONG_ANSWER)
+    assert run_stop(monkeypatch, capsys, "claude", {
+        "cwd": str(tmp_path), "session_id": "o", "transcript_path": str(transcript)}) is None
+    assert calls == []
+
+
+def test_consult_works_in_any_folder_but_not_client_checkouts(repo, tmp_path, monkeypatch):
+    fake_peers(monkeypatch, {"codex": APPROVE})
+    folder = tmp_path / "scratch"
+    folder.mkdir()
+    assert consult.tool_call("claude", {"repo_path": str(folder), "question": "Sort first?"})["isError"] is False
+    git(repo, "remote", "set-url", "origin", "https://github.com/some-client/app.git")
+    assert consult.tool_call("claude", {"repo_path": str(repo), "question": "Sort first?"})["isError"] is True
+
+
+def test_location_check_denies_a_checkout_git_refuses_to_read(repo, monkeypatch):
+    # e.g. git's "dubious ownership" refusal: git fails, but the folder is still a checkout.
+    monkeypatch.setattr(peer, "run", lambda *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal"))
+    assert peer.location_allowed(str(repo / "sub")) is False
+    assert peer.location_allowed(str(repo)) is False
+
+
+def test_location_check_looks_at_every_enclosing_checkout(repo, tmp_path):
+    git(repo, "remote", "set-url", "origin", "https://github.com/some-client/app.git")
+    inner = repo / "vendor" / "tool"
+    inner.mkdir(parents=True)
+    git(inner, "init", "-q")
+    git(inner, "remote", "add", "origin", "https://github.com/example-org/tool.git")
+    assert peer.location_allowed(str(inner)) is False
+    plain = tmp_path / "plain" / "deep"
+    plain.mkdir(parents=True)
+    assert peer.location_allowed(str(plain)) is True
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    git(fresh, "init", "-q")
+    assert peer.location_allowed(str(fresh)) is True
