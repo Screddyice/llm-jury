@@ -328,7 +328,10 @@ server and the first-edit and end-of-turn hooks for Claude Code (`~/.claude/sett
 Codex (`~/.codex/`). It replaces only its own entries and the legacy
 `llmjury review-hook --host codex` Stop hook, keeps every other hook and server, backs a
 file up as `<file>.bak-<time>-peer` before changing it, and changes nothing on a second
-run. Re-run it after pulling a change to the hook scripts. Afterwards, restart the agents
+run. A file counts as unchanged when its settings already match, even if another tool has
+since added its own hook after ours, the file has no final newline, or it holds non-ASCII
+text such as an em dash; when a file does change, non-ASCII text is written as typed rather
+than as `\u` escapes. Re-run it after pulling a change to the hook scripts. Afterwards, restart the agents
 and trust the new hooks in Codex's `/hooks` screen.
 
 Machine-specific settings stay out of the repository, in `~/.config/llmjury/peer-review.json`:
