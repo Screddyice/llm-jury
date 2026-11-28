@@ -219,11 +219,14 @@ def ask_claude(instructions, content, scratch, model):
 
 
 def codex_path():
-    found = shutil.which(CODEX)
-    if found:
-        return found
-    return next((str(place) for place in CODEX_PLACES
-                 if place.is_file() and os.access(place, os.X_OK)), None)
+    installed = next((str(place) for place in CODEX_PLACES
+                      if place.is_file() and os.access(place, os.X_OK)), None)
+    if installed:
+        return installed
+    path = os.environ.get("PATH", "")
+    if set(path.split(os.pathsep)) <= set(os.defpath.split(os.pathsep)):
+        return None
+    return shutil.which(CODEX)
 
 
 def ask_codex(instructions, content, scratch, model):
