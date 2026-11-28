@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,7 +16,6 @@ CONFIG = ROOT / ".config/llmjury/peer-review.json"
 CLAUDE = ROOT / ".local/bin/claude"
 CURSOR = ROOT / ".local/bin/cursor-agent"
 GROK = ROOT / ".grok/bin/grok"
-CODEX = "codex"
 # Hooks started by an editor can run with a short PATH, so look where installers put Codex too.
 CODEX_PLACES = (ROOT / ".local/bin/codex", Path("/opt/homebrew/bin/codex"), Path("/usr/local/bin/codex"))
 T3 = ROOT / ".t3/bin/t3"
@@ -352,9 +350,6 @@ def ask_claude(instructions, content, scratch, model):
 
 
 def codex_path():
-    found = shutil.which(CODEX)
-    if found:
-        return found
     return next((str(place) for place in CODEX_PLACES
                  if place.is_file() and os.access(place, os.X_OK)), None)
 
